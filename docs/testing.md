@@ -9,7 +9,7 @@ Date: 2026-09-20
 | Required project documents and R1–R6 were read | Passed | `PROJECT-MILESTONES.md`, `docs/feasibility.md` reviewed before implementation. |
 | Pinned source inspection | Passed | Local `jellyfin-web-v12.1` package reports 12.1.0; feasibility records clean tag `v12.1` / `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Relevant source paths are cited in `docs/architecture.md`. |
 | Browser test environment discovery | Blocked | The authorized in-app browser had no open test tab. No live server was opened, injected, restarted, or changed. |
-| Syntax/static check | Passed | `node --check src\\alpha-jump.js` and focused static regression assertions for both pre-browser review rounds completed successfully on 2026-09-20. `git diff --check` also completed successfully (line-ending warnings only). This does not replace browser behavior tests. |
+| Syntax/static check | Passed | `node --check src\\alpha-jump.js` and focused static regression assertions for all pre-browser review rounds completed successfully on 2026-09-20. `git diff --check` also completed successfully (line-ending warnings only). This does not replace browser behavior tests. |
 
 No browser behavior below has been marked passed. In particular, source review is not a substitute for an actual control/event/load test.
 
@@ -39,6 +39,8 @@ Use an authorized disposable test session with Jellyfin Server/Web version, brow
 | Duplicate injection and SPA round-trip | Reinject, Movies→detail→Movies, Movies→Home→Movies. Exactly one active picker listener/observer surface and no stale local selection. | Not run |
 | Visual/accessibility | Narrow and desktop view, sticky header, reduced motion, status/cancel, Escape, playback, card selection, menus, and Jellyfin Enhanced enabled/disabled. | Not run |
 | Enhancement selection | After a successful jump, selected letter is visibly marked and exposes `aria-current="true"`; native `aria-pressed`/stored Alphabet remain unchanged. | Not run |
+| Marker cleanup | Change to an unsupported sort, navigate away, and call destroy. The old picker has no `alpha-jump-selected`, `data-alpha-jump-selected`, or `aria-current` marker. | Not run |
+| Cancel feedback | Start a long jump and click the status Cancel button. Pending “Finding…” text and its Cancel button are replaced by a non-busy cancellation status. | Not run |
 
 ## Exact next test setup
 

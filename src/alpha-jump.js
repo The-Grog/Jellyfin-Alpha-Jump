@@ -231,7 +231,7 @@
             cancel.type = 'button';
             cancel.textContent = 'Cancel';
             cancel.style.cssText = 'margin-left:.5rem;';
-            cancel.addEventListener('click', () => cancelRun('cancelled by user'));
+            cancel.addEventListener('click', () => cancelRun('cancelled by user', true));
             feedback.appendChild(cancel);
         }
     }
@@ -256,6 +256,15 @@
 
     function clearSelection(context) {
         applySelection(context, null);
+    }
+
+    function removeSelectionMarkers(picker) {
+        if (!picker) return;
+        picker.buttons.forEach(button => {
+            button.classList.remove('alpha-jump-selected');
+            button.removeAttribute('data-alpha-jump-selected');
+            button.removeAttribute('aria-current');
+        });
     }
 
     function runIsCurrent(run) {
@@ -586,6 +595,7 @@
     }
 
     function detachSurface() {
+        removeSelectionMarkers(state.picker);
         if (state.picker && state.pickerClick) state.picker.group.removeEventListener('click', state.pickerClick, true);
         if (state.pager && state.pagerClick) {
             state.pager.previous.removeEventListener('click', state.pagerClick, true);

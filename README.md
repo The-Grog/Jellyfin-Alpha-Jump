@@ -34,6 +34,7 @@ Do not add this to JavaScript Injector or a live Jellyfin instance yet. An autho
 - A newer alphabet click during an enhancement-owned loading replacement is intercepted as the latest request; it cannot fall through to Jellyfin's native alphabet filter.
 - Budget exhaustion says **search incomplete**, never "no matching titles." Missing-letter restoration is best effort and uses the same budget.
 - The enhancement-selected letter has a scoped outline/weight treatment and `aria-current="true"`; native `aria-pressed` remains Jellyfin-owned.
+- Detaching, navigation, disable, or destroy removes the enhancement-only class/data/`aria-current` markers. Cancelling from the status button immediately replaces “Finding…” with “Alpha jump cancelled.”
 - Intermediary native page changes are visible because Jellyfin itself scrolls to the top on every pager click.
 
 See [docs/architecture.md](docs/architecture.md) for the evidence-backed design and [docs/testing.md](docs/testing.md) for what has and has not been run.
