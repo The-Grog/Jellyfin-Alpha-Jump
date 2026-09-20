@@ -1,0 +1,95 @@
+# ----------------------------
+# Local source/reference folders
+# ----------------------------
+/jellyfin source/
+
+# ----------------------------
+# .NET build output
+# ----------------------------
+bin/
+obj/
+artifacts/
+out/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+
+# ----------------------------
+# Visual Studio
+# ----------------------------
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# ----------------------------
+# VS Code
+# ----------------------------
+.vscode/
+
+# ----------------------------
+# JetBrains Rider / IntelliJ
+# ----------------------------
+.idea/
+*.sln.iml
+
+# ----------------------------
+# NuGet
+# ----------------------------
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# ----------------------------
+# Test output
+# ----------------------------
+TestResults/
+*.trx
+coverage/
+coverage.xml
+coverage.json
+
+# ----------------------------
+# Logs
+# ----------------------------
+*.log
+logs/
+
+# ----------------------------
+# OS files
+# ----------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----------------------------
+# Temporary files
+# ----------------------------
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+*~
+
+# ----------------------------
+# Local environment/config
+# ----------------------------
+.env
+.env.*
+!.env.example
+
+# ----------------------------
+# Generated binaries
+# ----------------------------
+*.dll
+*.pdb
+*.exe
+
+# ----------------------------
+# Publish output
+# ----------------------------
+publish/
+Published/
