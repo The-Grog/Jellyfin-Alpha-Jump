@@ -48,3 +48,7 @@ Use an authorized disposable test session with Jellyfin Server/Web version, brow
 2. Record its Server/Web/browser/Injector/Enhanced versions and preserve a network HAR or screenshots of the ordinary query parameters and page transitions.
 3. Paste `src/alpha-jump.js` only into that session’s DevTools console, perform the checklist in order, and record each outcome here with timestamps and defects.
 4. If source-shaped icon, local-storage, event, or settle assumptions fail, stop the prototype rather than adding React/internal-API workarounds.
+
+## First Firefox runtime finding — 2026-09-20
+
+User-supplied console evidence found the picker and both pager icons, but activation failed because the prototype used an uppercase settings key and a class selector for the page. The actual key is `movies - <parentId>` and the container is `div#moviesPage`. The diagnostic found 80 Movie cards, all with data-prefix. Corrected the key and page/card/empty-result selectors; the lowercase key is also confirmed by upstream LibraryTab.Movies. Re-injection and functional jump behavior remain untested after this correction.

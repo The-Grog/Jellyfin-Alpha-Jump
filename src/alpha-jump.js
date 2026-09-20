@@ -74,7 +74,7 @@
     function readSettings(route) {
         if (!route.parentId) return null;
         try {
-            const raw = window.localStorage.getItem(`Movies - ${route.parentId}`);
+            const raw = window.localStorage.getItem(`movies - ${route.parentId}`);
             return raw ? JSON.parse(raw) : null;
         } catch (caught) {
             error('Could not read the public Movies view settings.', caught);
@@ -145,13 +145,13 @@
 
     function getContext() {
         const route = routeInfo();
-        if (!route.isMovies || !document.querySelector('.moviesPage')) return null;
+        if (!route.isMovies || !document.querySelector('#moviesPage')) return null;
         const settings = readSettings(route);
         const picker = findPicker();
         const pager = findPager();
         if (!settings || !picker || !pager) return null;
-        const cards = Array.from(document.querySelectorAll('.moviesPage .card[data-prefix][data-type="Movie"]'));
-        const emptyResult = !!document.querySelector('.moviesPage .noItemsMessage.centerMessage');
+        const cards = Array.from(document.querySelectorAll('#moviesPage .card[data-prefix][data-type="Movie"]'));
+        const emptyResult = !!document.querySelector('#moviesPage .noItemsMessage.centerMessage');
         const startIndex = Number(settings.StartIndex || 0);
         if (!Number.isFinite(startIndex) || startIndex < 0) return null;
         return {

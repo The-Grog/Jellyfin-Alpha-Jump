@@ -1,40 +1,119 @@
-# Jellyfin Alpha Jump — local prototype
+# Jellyfin Alpha Jump
 
-This is a **local, uninstalled prototype** for Jellyfin Web 12.1's modern Movies grid. It changes a supported alphabet-picker click into a bounded, visible native-page scan: it returns to page one with Jellyfin's own Previous control, uses Next one page at a time, then scrolls to the first card whose `data-prefix` starts with the requested letter.
+**Status: experimental page-jump prototype. Continuous scrolling is not implemented.**
 
-It is not a Plex-style continuous library and it does not make late-letter navigation fast. It does not contain a server plugin, build system, independent item query, copied Jellyfin source, or deployment artifact.
+Jellyfin Alpha Jump explores changing Jellyfin Web's Movies alphabet picker from filtering by letter to navigating to that letter within the current library results.
 
-## Supported surface
+The original goal is a Plex-style experience: click **M**, reach the first matching title, then scroll freely through earlier and later titles without an alphabet filter. **The current prototype does not achieve that full experience.**
 
-- Jellyfin Web 12.1 modern `#/movies?...&collectionType=movies` route only.
-- Persisted `ViewMode: "grid"` plus either Movie card wrappers (`.card[data-prefix][data-type="Movie"]`) or Jellyfin's own empty-grid message. List view is not intercepted.
-- Exact `SortBy: ["SortName"]` and `SortOrder: "Ascending"`, read from Jellyfin's public browser local-storage view setting (`Movies - <topParentId>`).
-- One source-shaped alphabet picker and one source-shaped pager. Pager discovery uses MUI's `NavigateBeforeIcon` and `NavigateNextIcon`, not English button text.
+## What the prototype currently does
 
-Anything else is left native. The script deliberately does not access React fibers, query caches, or internal component instances, and never calls Jellyfin APIs itself.
+On the targeted Movies grid, the script attempts to:
 
-## Local testing only
+1. Prevent the native alphabet filter and clear an existing alphabet selection.
+2. Preserve the current non-alphabet filters.
+3. Return to page one using Jellyfin's native Previous button.
+4. Advance through native pages until it finds a card whose sort-name prefix matches the requested letter.
+5. Scroll to that card and mark the requested letter in the picker.
 
-Do not add this to JavaScript Injector or a live Jellyfin instance yet. An authorized disposable browser/test server is needed for the checks in [docs/testing.md](docs/testing.md). When that exists:
+This is **letter-to-page navigation**, followed by a scroll within that page. Jellyfin continues to own the cards, rendering, and pagination. The script does not directly fetch library items or replace the renderer.
 
-1. Open the supported modern Movies route with ascending Name/SortName order and browser DevTools available.
-2. Paste the contents of [src/alpha-jump.js](src/alpha-jump.js) into the DevTools console. This is a temporary local test, not an installation.
-3. Confirm the normal picker keeps its appearance. During a scan, the small status message includes Cancel; `Escape` also cancels.
-4. To remove it from that page, run `window.__alphaJumpPrototypeV1.destroy('manual test complete')` in the same console, then refresh if desired.
+## Main limitation: pages still replace each other
 
-`CONFIG` is at the top of the script. `maxNavigationActions` counts every native page-changing action: Previous/Next, an existing native-alphabet clear that resets to page one, and best-effort restoration. `maxElapsedMs` covers the whole operation. `maxPageSettleMs` caps one native transition; `maxNoProgressMs` caps how long that transition can have no relevant settings/pending/card progress. Neither is a polling interval. With `debug: false`, `[AlphaJump]` writes only actual errors.
+Jellyfin's tested Movies view uses replacing pagination. Moving to another page removes the previous page's cards; this prototype does not retain or append them.
 
-## Limits and safety behavior
+After jumping to M, you therefore see only the current page's titles, which may include neighboring letters. Reaching the bottom does not continue into the rest of the library. Use Jellyfin's native Previous/Next controls to move beyond that page.
 
-- An existing native alphabet filter is cleared via one narrowly permitted click of its selected native button; enhancement selection is separate and is never persisted to Jellyfin's `Alphabet` setting.
-- The script does not use a "passed the letter" shortcut. `MAR` is an `M` candidate because matching is `data-prefix.startsWith('M')`.
-- A disabled Next is considered end-of-list only after a separate settle check confirms the requested public settings start index/direction, real card or Jellyfin `NoItemsMessage` DOM, absence of Jellyfin's pending bullet, and the expected Previous state. Runtime proof of this contract remains outstanding.
-- Every run first settles the current page before clearing/scanning. `#` and a selected-letter re-click explicitly scroll to viewport top even if they are already on page one.
-- Route, sort, filter, search, and user-page changes cancel a run. A changed query is never restored. Cancellation leaves the current native page alone.
-- A newer alphabet click during an enhancement-owned loading replacement is intercepted as the latest request; it cannot fall through to Jellyfin's native alphabet filter.
-- Budget exhaustion says **search incomplete**, never "no matching titles." Missing-letter restoration is best effort and uses the same budget.
-- The enhancement-selected letter has a scoped outline/weight treatment and `aria-current="true"`; native `aria-pressed` remains Jellyfin-owned.
-- Detaching, navigation, disable, or destroy removes the enhancement-only class/data/`aria-current` markers. Cancelling from the status button immediately replaces “Finding…” with “Alpha jump cancelled.”
-- Intermediary native page changes are visible because Jellyfin itself scrolls to the top on every pager click.
+This is an architectural limitation, not a configuration switch or an indication that the alphabet filter must still be active. Achieving continuous scrolling requires a different approach that retains or virtualizes results across page boundaries. That approach has not yet been selected or validated.
 
-See [docs/architecture.md](docs/architecture.md) for the evidence-backed design and [docs/testing.md](docs/testing.md) for what has and has not been run.
+Other limitations:
+
+- Page changes and top-of-page movements are visible during a scan.
+- Late letters may require visiting most of the matching library. This is not a fast indexed jump.
+- Navigation and time budgets can stop a search before it reaches the destination.
+- Returning to the starting page after a missing-letter scan is best effort within the same budget.
+- Locale, custom sort titles, accented/non-Latin names, and server collation are not comprehensively validated.
+- Hooks depend on Jellyfin Web's DOM and browser-local settings; upgrades can invalidate them.
+
+## Current evidence
+
+As of September 20, 2026:
+
+| Area | Current state |
+| --- | --- |
+| Source target | Jellyfin Web `v12.1`, upstream commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b` |
+| Local checks | Syntax, whitespace, and focused isolated regression checks have passed during development. These do not establish browser compatibility. |
+| Firefox activation | Initial testing exposed two incorrect hooks: the settings key is lowercase `movies - <parentId>` and the page container is `#moviesPage`. Both were corrected. |
+| First manual trial | After re-injection, the user reported the jump behavior working, but only the destination page and nearby letters were visible. Continuous scrolling was unavailable. |
+| Network verification | Absence of native alphabet-filter parameters and preservation of all other filters have not yet been independently verified in the browser. |
+| Full browser checklist | Outstanding, including delayed loading, rapid requests, failures, SPA navigation, accessibility, and cleanup. |
+| Jellyfin Enhanced | Present in the initial environment; comprehensive coexistence testing has not been completed. |
+| Distribution | Browser-session prototype. Not a completed release or a standalone Jellyfin server plugin. |
+
+The manual trial is limited evidence of page navigation, not proof that every implementation guarantee holds. Earlier detailed test records are in [docs/testing.md](docs/testing.md).
+
+## Targeted environment
+
+The current implementation targets:
+
+- Jellyfin Web 12.1's modern Movies route and `#moviesPage` container.
+- Movie grid view with ascending Name/SortName order.
+- Persisted `ViewMode: "grid"`, `SortBy: ["SortName"]`, and `SortOrder: "Ascending"`.
+- The `movies - <topParentId>` browser-local settings key.
+- Movie cards carrying `data-prefix` and the expected alphabet/pagination controls.
+
+Other library types, list view, native clients, and other Web versions are not supported targets. The script is designed to leave unsupported states native; broader compatibility remains unverified.
+
+## Temporary browser-session testing
+
+Use a dedicated browser session for a controlled trial. Do not enable this through JavaScript Injector for general use yet. Temporary testing against an existing Jellyfin server is possible: the script drives normal library requests and changes that browser session's persisted view settings.
+
+1. Open Movies in grid view, sorted by Name ascending, and clear the native alphabet filter.
+2. Open your browser's page console. In Firefox on Windows, press **Ctrl+Shift+K**.
+3. Paste the complete contents of [src/alpha-jump.js](src/alpha-jump.js) and run it. An `undefined` return value is normal.
+4. Check `window.__alphaJumpPrototypeV1`; an object with `destroy` and `config` confirms initialization, but does not by itself prove that the picker was intercepted.
+5. Close or undock DevTools if it reduces the viewport enough to hide Jellyfin's alphabet picker.
+6. Try an already-loaded letter, then an unloaded letter. Expect visible page navigation, not an accumulated scrollable library.
+
+To enable debug logging after injection:
+
+```js
+window.__alphaJumpPrototypeV1.config.debug = true;
+```
+
+To remove the prototype from the current document:
+
+```js
+window.__alphaJumpPrototypeV1?.destroy('testing complete');
+```
+
+A full page refresh also removes a console-injected copy. Navigating within Jellyfin's SPA does not necessarily remove it. Neither removal method restores the previous page/filter settings automatically. If the local script changes, copy and run the updated file; an existing pasted copy does not update itself.
+
+## Implemented controls and remaining validation
+
+The script includes Cancel/Escape handling, latest-request replacement, query-change cancellation, reduced-motion-aware scrolling, enhancement-owned selection markers, and cleanup on detachment/destroy. It attempts to wait for settled results before interpreting disabled pagination as end-of-list. These paths still need the browser scenarios in [docs/testing.md](docs/testing.md).
+
+Configuration is at the top of `src/alpha-jump.js`:
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | `true` | Initialize the enhancement on injection. |
+| `moviesOnly` | `true` | Retain the Movies restriction; changing it does not add other library support. |
+| `respectSortOrder` | `true` | Require the supported ascending SortName order. Keep enabled. |
+| `smoothScroll` | `true` | Smooth destination scrolling, subject to reduced-motion preferences. |
+| `debug` | `false` | Enable `[AlphaJump]` diagnostic logs. Actual errors may still be logged when false. |
+| `maxNavigationActions` | `80` | Bound native navigation actions, including clearing, backward paging, scanning, and restoration. |
+| `maxElapsedMs` | `60000` | Bound the complete operation. |
+| `maxPageSettleMs` | `8000` | Bound a single transition wait. |
+| `maxNoProgressMs` | `4000` | Bound a transition with no observed relevant progress. |
+
+## Next decision
+
+The page-jump prototype provides evidence about Jellyfin's controls, but is not the finished feature originally intended. The next architecture review should determine whether a maintainable browser enhancement can support continuous scrolling while preserving Jellyfin's normal behavior, or whether an upstream Web change or another integration approach is more appropriate.
+
+No continuous-scrolling implementation or general Injector rollout is established by the current prototype.
+
+- [Milestones and review tracking](PROJECT-MILESTONES.md)
+- [Feasibility and open findings](docs/feasibility.md)
+- [Current architecture](docs/architecture.md)
+- [Testing record and checklist](docs/testing.md)

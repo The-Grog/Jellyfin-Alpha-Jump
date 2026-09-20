@@ -6,7 +6,7 @@ This is a plain injected JavaScript experiment for Jellyfin Web v12.1 modern Mov
 
 The supplied checkout is `jellyfin-web` tag `v12.1`, commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Source evidence:
 
-- `src/apps/modern/features/libraries/hooks/useLibrary.tsx:36-60` persists a `LibraryViewSettings` object through browser local storage; `utils/settings.ts:30-32` makes the Movies key `Movies - <parentId>`.
+- `src/apps/modern/features/libraries/hooks/useLibrary.tsx:36-60` persists a `LibraryViewSettings` object through browser local storage; `utils/settings.ts:30-32` makes the Movies key `movies - <parentId>`.
 - `components/SortButton.tsx:189-203` stores `SortBy`, `SortOrder`, and resets `StartIndex`; `utils/settings.ts:17-27` gives Movies the ascending `SortName` default. `types/library.ts:52-55` defines the required grid value as `ViewMode.GridView = 'grid'`.
 - `components/AlphabetPicker.tsx:15-29,59-70` specifies the picker values and its exclusive native change path. `ItemsView.tsx:186-192` clears to `Alphabet: null` and page zero. `utils/items.ts:128-136` omits alphabet query fields for null.
 - `components/Pagination.tsx:28-42,50-64` defines native Previous/Next start-index movement and the unavoidable top-of-page scroll. `LibraryToolbar.tsx:75-92,234-241` explains page range, pending bullet, and why disabled buttons alone are insufficient.
@@ -14,7 +14,7 @@ The supplied checkout is `jellyfin-web` tag `v12.1`, commit `fae41f33eb7cd636a9e
 
 ## Public state contract
 
-The script accepts only a route containing `#/movies` and `collectionType=movies`, a `.moviesPage`, exactly one source-shaped picker, exact ascending `SortName`, persisted `ViewMode: 'grid'`, actual Movie cards (or Jellyfin's `.noItemsMessage.centerMessage`), and a source-shaped native pager. List view is not armed. The narrower compatible state deliberately remains available to a one-shot settle observer while Jellyfin temporarily renders its loading component.
+The script accepts only a route containing `#/movies` and `collectionType=movies`, a `#moviesPage`, exactly one source-shaped picker, exact ascending `SortName`, persisted `ViewMode: 'grid'`, actual Movie cards (or Jellyfin's `.noItemsMessage.centerMessage`), and a source-shaped native pager. List view is not armed. The narrower compatible state deliberately remains available to a one-shot settle observer while Jellyfin temporarily renders its loading component.
 
 The non-alphabet query identity is a canonicalized combination of route hash, `topParentId`, and the full persisted Movies setting excluding only `StartIndex` and `Alphabet`. That preserves all filter fields without having to infer them from localized toolbar text. Mutation observation, `hashchange`, `popstate`, and a document bubble-phase click observer re-read that identity; the click observer schedules after React's ordinary click handling and never suppresses native events. A mismatch cancels the run. Script-owned page movements are recognized only while the next settled state has the same identity and moves the stored `StartIndex` in the expected direction; a trusted user pager click cancels immediately.
 
