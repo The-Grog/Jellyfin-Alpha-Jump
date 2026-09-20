@@ -24,7 +24,7 @@ This is source-backed but not yet runtime-proven for every filter/search impleme
 
 The pager is not found by `Previous`/`Next` labels. The script requires exactly one `button` containing `svg[data-testid="NavigateBeforeIcon"]` and one containing `svg[data-testid="NavigateNextIcon"]`, sharing a parent in a MUI toolbar. Jellyfin pins MUI 6.5.0, whose [`createSvgIcon`](https://raw.githubusercontent.com/mui/material-ui/v6.5.0/packages/mui-material/src/utils/createSvgIcon.js) supplies `data-testid="${displayName}Icon"`; served-page confirmation remains a runtime compatibility gate.
 
-After every ordinary pager click, a one-shot `MutationObserver` waits up to `maxPageSettleMs`; it does not poll. Its `maxNoProgressMs` one-shot timer is reset only by an expected start-index direction, the v12.1 pending marker, or changed card signature. A page is accepted only when:
+After every ordinary pager click, a one-shot `MutationObserver` waits up to `maxPageSettleMs`; it does not poll. Its `maxNoProgressMs` one-shot timer is reset only when a compact relevant-state snapshot changes: start index, card signature, pending marker, native alphabet value, genuine-empty marker, or Previous disabled state. Unrelated DOM mutations cannot perpetually reset the timer. A page is accepted only when:
 
 1. persisted `StartIndex` has the requested value/direction;
 2. the non-alphabet query identity still matches;
@@ -48,11 +48,11 @@ alphabet click (picker-scoped capture)
 
 Every run first uses this settle contract on its current page; `#` and re-clicking the enhancement-selected letter return to page one and scroll to viewport top even if already there. The latter clears enhancement selection. No ordering-based early exit exists because server collation and prefix semantics have not been browser-verified. A run is cancelled on a newer request, route/state identity change, trusted user pager click, Escape, disable, or page-settle failure. It never restores after a query change. All Previous/Next actions share one action/time budget; after exhaustion the result is reported as incomplete.
 
-The picker listener is capture-phase but is attached only to the verified picker group. It prevents the native event only for supported user alphabet clicks. `nativeClear` permits precisely the script's one selected-button click to reach Jellyfin's ordinary MUI handler; because that clear resets the page, it consumes the same navigation budget. No global event suppression is used.
+The picker listener is capture-phase but is attached only to the verified picker group. It prevents the native event only for supported user alphabet clicks. During an enhancement-owned compatible loading state, it also intercepts a newer letter so that request supersedes the run rather than falling through to Jellyfin's native alphabet filter. `nativeClear` permits precisely the script's one selected-button click to reach Jellyfin's ordinary MUI handler; because that clear resets the page, it consumes the same navigation budget. No global event suppression is used.
 
 ## Lifecycle and accessibility
 
-One global instance key destroys a previous injection before binding a new one. Surface listeners are detached when the Movies surface changes; the persistent observer/hash/click observers merely re-arm a newly rendered supported Movies view. Enhancement selection stores its query identity and is cleared on an idle filter/sort/search identity change, not only during a run. One-shot settle observers disconnect on resolution, cancellation, or timeout. There is no `setInterval`.
+One global instance key destroys a previous injection before binding a new one. Surface listeners are detached when the Movies surface changes; the persistent observer/hash/click observers merely re-arm a newly rendered supported Movies view. Enhancement selection stores its query identity and is cleared on an idle filter/sort/search identity change, not only during a run. Its scoped outline/weight style and `aria-current="true"` identify the enhancement selection without writing Jellyfin's native `aria-pressed`/Alphabet state. One-shot settle observers disconnect on resolution, cancellation, or timeout. There is no `setInterval`.
 
 The small feedback element is `role=status` with `aria-live=polite`; pending work exposes an ordinary Cancel button and Escape cancellation. Scrolling honors `prefers-reduced-motion` and accounts for a header/AppBar height. It does not move keyboard focus.
 

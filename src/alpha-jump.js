@@ -39,6 +39,7 @@
         pager: null,
         observer: null,
         feedback: null,
+        style: null,
         nativeClear: null,
         destroyed: false,
         pickerClick: null,
@@ -201,6 +202,27 @@
         return feedback;
     }
 
+    function ensureStyles() {
+        if (state.style && state.style.isConnected) return;
+        const style = document.createElement('style');
+        style.id = 'alpha-jump-prototype-style';
+        style.textContent = [
+            '.alphaPicker-fixed-right button[data-alpha-jump-selected="true"] {',
+            '  outline: 2px solid currentColor;',
+            '  outline-offset: -2px;',
+            '  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .22);',
+            '  font-weight: 700;',
+            '}'
+        ].join('\n');
+        document.head.appendChild(style);
+        state.style = style;
+    }
+
+    function removeStyles() {
+        if (state.style) state.style.remove();
+        state.style = null;
+    }
+
     function announce(context, message, cancelable) {
         const feedback = ensureFeedback(context);
         feedback.replaceChildren(document.createTextNode(message));
@@ -220,12 +242,15 @@
     }
 
     function applySelection(context, value) {
+        ensureStyles();
         state.selected = value;
         state.selectedQueryId = value === null ? null : context.queryId;
         context.picker.buttons.forEach(button => {
             const selected = button.value === value;
             button.classList.toggle('alpha-jump-selected', selected);
             button.setAttribute('data-alpha-jump-selected', selected ? 'true' : 'false');
+            if (selected) button.setAttribute('aria-current', 'true');
+            else button.removeAttribute('aria-current');
         });
     }
 
@@ -276,12 +301,16 @@
         return true;
     }
 
-    function showsTransitionProgress(context, wantedStart, oldSignature) {
-        if (!context || !isCompatible(context)) return false;
-        return wantedStart.test(context.startIndex)
-            || context.cardSignature !== oldSignature
-            || hasPendingMarker(context.pager)
-            || (wantedStart.nativeAlphabet !== undefined && context.nativeAlphabet === wantedStart.nativeAlphabet);
+    function progressSnapshot(context) {
+        if (!context || !isCompatible(context)) return null;
+        return JSON.stringify({
+            startIndex: context.startIndex,
+            cards: context.cardSignature,
+            pending: hasPendingMarker(context.pager),
+            nativeAlphabet: context.nativeAlphabet,
+            emptyResult: context.emptyResult,
+            previousDisabled: context.pager.previous.disabled
+        });
     }
 
     function waitForSettled(run, wantedStart, oldSignature, label) {
@@ -289,6 +318,7 @@
             let done = false;
             let timeout = null;
             let noProgressTimeout = null;
+            let lastProgressSnapshot = null;
             const finish = (failure, context) => {
                 if (done) return;
                 done = true;
@@ -309,7 +339,11 @@
                 const context = getContext();
                 if (!isCompatible(context)) return finish(new Error('supported Movies state disappeared'));
                 if (context.queryId !== run.queryId) return finish(new Error('query changed'));
-                if (showsTransitionProgress(context, wantedStart, oldSignature)) resetNoProgressTimeout();
+                const currentProgressSnapshot = progressSnapshot(context);
+                if (currentProgressSnapshot !== lastProgressSnapshot) {
+                    lastProgressSnapshot = currentProgressSnapshot;
+                    resetNoProgressTimeout();
+                }
                 if (settledFor(context, wantedStart, oldSignature)) {
                     // One frame ensures React has committed the matching page, without using polling.
                     window.requestAnimationFrame(() => {
@@ -430,7 +464,7 @@
 
     async function execute(run, letter) {
         let context = getContext();
-        if (!isSupported(context) || context.queryId !== run.queryId) throw new Error('unsupported or changed initial state');
+        if (!isCompatible(context) || context.queryId !== run.queryId) throw new Error('unsupported or changed initial state');
         context = await waitForSettled(run, initialExpectation(context), context.cardSignature, 'initial Movies results');
         context = await clearNativeAlphabet(run, context);
         context = await returnToStart(run, context);
@@ -487,9 +521,11 @@
 
     function begin(letter) {
         const context = getContext();
-        if (!isSupported(context)) return;
+        if (!isCompatible(context)) return;
+        const supersedingRun = !!state.run;
         cancelRun('superseded');
-        const target = state.selected === letter && state.selectedQueryId === context.queryId ? null : letter;
+        const target = !supersedingRun && state.selected === letter && state.selectedQueryId === context.queryId ? null : letter;
+        clearSelection(context);
         const run = {
             queryId: context.queryId,
             startedAt: performance.now(),
@@ -518,7 +554,10 @@
             return;
         }
         const context = getContext();
-        if (!isSupported(context)) return;
+        // While an enhancement-owned page replacement is loading, keep ownership of the
+        // verified compatible picker: the newer letter supersedes the old run instead of
+        // falling through to Jellyfin's native alphabet filter.
+        if (!isCompatible(context) || (!isSupported(context) && !state.run)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         begin(button.value);
@@ -630,6 +669,7 @@
         if (state.popState) window.removeEventListener('popstate', state.popState);
         if (state.keyDown) document.removeEventListener('keydown', state.keyDown, true);
         if (state.userClick) document.removeEventListener('click', state.userClick, false);
+        removeStyles();
         delete window[INSTANCE_KEY];
         log('Destroyed:', reason || 'disabled');
     }

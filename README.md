@@ -31,7 +31,9 @@ Do not add this to JavaScript Injector or a live Jellyfin instance yet. An autho
 - A disabled Next is considered end-of-list only after a separate settle check confirms the requested public settings start index/direction, real card or Jellyfin `NoItemsMessage` DOM, absence of Jellyfin's pending bullet, and the expected Previous state. Runtime proof of this contract remains outstanding.
 - Every run first settles the current page before clearing/scanning. `#` and a selected-letter re-click explicitly scroll to viewport top even if they are already on page one.
 - Route, sort, filter, search, and user-page changes cancel a run. A changed query is never restored. Cancellation leaves the current native page alone.
+- A newer alphabet click during an enhancement-owned loading replacement is intercepted as the latest request; it cannot fall through to Jellyfin's native alphabet filter.
 - Budget exhaustion says **search incomplete**, never "no matching titles." Missing-letter restoration is best effort and uses the same budget.
+- The enhancement-selected letter has a scoped outline/weight treatment and `aria-current="true"`; native `aria-pressed` remains Jellyfin-owned.
 - Intermediary native page changes are visible because Jellyfin itself scrolls to the top on every pager click.
 
 See [docs/architecture.md](docs/architecture.md) for the evidence-backed design and [docs/testing.md](docs/testing.md) for what has and has not been run.
