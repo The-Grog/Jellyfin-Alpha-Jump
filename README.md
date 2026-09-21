@@ -1,21 +1,35 @@
 # Jellyfin Alpha Jump
 
-Experimental, browser-only enhancement for Jellyfin Web v12.1 Movies. It changes a supported alphabet-picker click from native letter filtering into a scroll to the first rendered card whose `data-prefix` starts with that letter.
+Experimental, browser-only enhancement for Jellyfin Web v12.1 Movies and Shows. It changes a supported alphabet-picker click from native letter filtering into a scroll to the first rendered card whose `data-prefix` starts with that letter.
 
-This is not a server plugin, custom renderer, item fetcher, virtualizer, or continuously loading view. Jellyfin still fetches and renders the library; Alpha Jump only observes the rendered Movies page and scrolls it.
+This is not a server plugin, custom renderer, item fetcher, virtualizer, or continuously loading view. Jellyfin still fetches and renders the library; Alpha Jump only observes the rendered library page and scrolls it.
 
 ## Required setup
 
-The prototype is intentionally inert unless all of these are true:
+When enabled, Alpha Jump automatically configures the signed-in Jellyfin user's
+**Library page size** to `0` for this browser origin. This is an intentional
+product default, not a server setting: it affects that user's library views in
+this browser, not Movies alone, and can make large libraries slower or less
+stable. The script preserves the prior value once per user/origin, then uses one
+guarded page reload so Jellyfin can apply the setting. A console-injected copy
+is removed by that reload and must be pasted again; an Injector entry loads
+again normally.
 
-- Modern Movies route and exactly one `#moviesPage` / native alphabet picker.
+The enhancement itself is intentionally inert unless all of these are true:
+
+- Modern Movies (`#/movies`, `#moviesPage`) or Shows (`#/tv`, `#tvshowsPage`) main tab with one native alphabet picker. Episodes, suggestions, and other tabs remain native.
 - Grid view, `SortBy: ["SortName"]`, and ascending sort.
-- Persisted Movies `StartIndex` is explicitly `0`.
-- Jellyfin's page-size-zero mode has rendered a complete large result: the single toolbar total is greater than 100 and equals the number of rendered Movie cards.
+- Persisted Movies/Series `StartIndex` is explicitly `0`.
+- The numeric toolbar total exactly equals the number of rendered Movie cards.
 
-Set the last condition yourself in Jellyfin Web: **User Menu → Settings → Display → Libraries → Library page size → 0**, click **Save**, then return to Movies and let it load. Jellyfin Web v12.1 documents that zero disables pagination and warns that zero (or values above 100) may cause bugs and reduced performance. Alpha Jump never changes this preference.
+Jellyfin Web v12.1 documents that zero disables pagination and warns that zero
+(or values above 100) may cause bugs and reduced performance. Automatic setup
+does **not** prove that an already visible query is complete: Alpha Jump still
+requires the exact toolbar/card match above. That includes small libraries and
+filtered results of 100 or fewer; mismatched or pending results retain native
+behavior.
 
-At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why this prototype refuses a missing or nonzero persisted index. The served client did not expose the source-described `libraryPageSize` storage key, so the code does not rely on that key to arm. It instead requires a complete large rendered result, avoiding the ambiguous no-pager case of a normal query with 100 or fewer results.
+At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why this prototype refuses a missing or nonzero persisted index. The active preference key is `<signed-in-user-id>-libraryPageSize`, not the old unprefixed assumption. The code uses that key only to configure the preference; it never treats it as evidence that a current result has rendered.
 
 ## Behavior
 
@@ -53,7 +67,23 @@ Verify it armed before clicking a letter. To remove it:
 window.__alphaJumpPrototypeV1?.destroy('testing complete');
 ```
 
-A refresh also removes a console-injected script. Neither action changes Jellyfin preferences.
+A refresh also removes a console-injected script. `destroy()` removes listeners,
+markers, feedback, and styles, but deliberately does not change pagination or
+reload the page.
+
+### Restore the prior page-size preference
+
+First disable/remove the Injector entry (or do not re-paste a console copy), so
+the next load cannot apply zero again. Then, while signed in as the same user
+and on the same browser origin, run:
+
+```js
+window.__alphaJumpPrototypeV1?.restorePagination();
+```
+
+It restores Alpha Jump's one-time backup for that user, including removing the
+preference when it was originally absent. It does not reload; refresh manually
+after the script is disabled to let Jellyfin use the restored value.
 
 ## Findings
 
@@ -62,23 +92,32 @@ These are implementation records, not a compatibility claim.
 | Finding | Evidence / implication |
 | --- | --- |
 | Page size zero is a native v12.1 mode | `LibraryPreferences.tsx` exposes `libraryPageSize`; the English preference help says zero disables pagination and warns about bugs/reduced performance. `getLimitQuery()` turns zero into an omitted request `limit`. |
+| Correct preference key is user-local | `userSettings.libraryPageSize()` calls `set('libraryPageSize', value, false)`. That calls `appSettings.set(name, value, currentUserId)`, whose key format is `<userId>-<name>`. The current user comes from public `window.ApiClient.getCurrentUserId()`. |
 | Start index still matters | The v12.1 item request continues to send `StartIndex`. The script requires explicit persisted `StartIndex: 0`, so it cannot mistake an unpaginated suffix for the full constrained library. |
-| Served page-size storage differs from source expectation | The served 12.1 session displayed the UI's zero-page mode and 1,538 rendered cards while its injected probe saw no `libraryPageSize` key. The support gate therefore proves complete unpaginated rendering from the toolbar/card counts, while still reading only public route/DOM/view settings. |
-| Native alphabet subsets need an earlier full-result proof | The complete-render proof intentionally requires a toolbar/card total above 100 to reject an ambiguous ordinary one-page result. The latest local source caches that proof for the same route/filter/sort query (excluding only Alphabet), so a subsequently chosen native subset may be cleared safely. An initially encountered subset at or below 100 still fails closed and retains native behavior. This safeguard has deterministic coverage but still needs served-browser validation. |
+| Unprefixed storage was a historical mistake | The served session had no unprefixed `libraryPageSize`, which correctly exposed the old implementation defect. v12.1 source shows that the correct active-user key is prefixed; this prototype now reads/writes only that key and preserves a scoped backup. |
+| Small results are resolved by equality, not a threshold | A toolbar total equal to the rendered Movie-card count proves that current result is complete, including <=100 results. A large number by itself proves nothing. An active native alphabet remains fail-closed until the same alphabet-clear query was previously confirmed. |
 | Readiness is a render-state question | `ItemsView` shows Loading while its result is pending, then Cards or `NoItemsMessage`. An empty DOM or cleared native alphabet button by itself is insufficient. |
 | Native alphabet selection is separately owned | The existing MUI ToggleButton deselects to `null`. Alpha Jump allows just that clear click through, then keeps its own visible `aria-current` selection without changing native `aria-pressed`. |
 | Card prefix is the match surface | Movie card wrappers expose `data-prefix`; matching uses literal `startsWith(letter)`, not equality or an unverified ordering shortcut. |
 | The former page scan is historical | The earlier Previous/Next experiment proved visible replacing pages cannot yield Plex-style continuous scrolling. This design removes its pager machinery in favour of v12.1's native zero-page-size path. |
-| Page-size zero must be saved through Jellyfin's UI | Display settings showed Library page size `100` with a separate Save button. The prototype never writes preferences. In the later saved-zero state, Movies showed a 1,538 total with 1,538 renderer Movie cards and no pager; this is the supported runtime shape. |
+| Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it still arms only after the current result's toolbar/card equality and other view gates succeed. |
 | Jellyfin Enhanced remains a compatibility risk | With Jellyfin Enhanced active, an earlier zero-page-size observation exposed a virtualized region reporting `showing 0-500 of 4609 items` while the toolbar reported 1,538. The prototype only inspects rendered cards, so it cannot yet claim a complete constrained-query scan or acceptable performance under that plugin. |
 
 The target browser still has to validate served-DOM selectors, keyboard/capture event ordering, network parameters, cleared-filter timing, pagination-zero performance, and Jellyfin Enhanced coexistence. See [docs/feasibility.md](docs/feasibility.md) and [docs/testing.md](docs/testing.md).
 
 ## Limits
 
-- Page size zero asks Jellyfin to load and render the entire currently constrained Movies result. Its performance on the target roughly 1,500-title library is **not yet tested**.
+- Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including non-Movies library views. Its performance on the target roughly 1,500-title library is **not yet tested**.
 - Source inspection supports the selectors and readiness model, but a served page must still prove event interception, request parameters, loading behavior, sticky-header positioning, and Jellyfin Enhanced coexistence.
 - Sort-name/card-prefix collation for custom titles, punctuation, accents, and non-Latin titles is not claimed beyond the literal prefix values the page renders.
 - This source has not been installed, packaged, committed, pushed, or published by this rework.
 
 The previous sequential native-page scan is retained as historical evidence in [docs/architecture.md](docs/architecture.md); it is not the current design.
+
+## Shows support
+
+Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. Set `showsEnabled: false` or `moviesOnly: true` to retain Movies-only behavior. Source and local regression tests verify the hooks; Shows has not yet been tested in the live browser.
+
+For testing, replace the existing Injector entry with the updated source, save, and fully reload. Open Shows, select its main Shows tab, use Name ascending/grid, and clear native alphabet filtering. Try A, M, Z, then #, and verify all shows remain scrollable. Navigate Movies → Shows → Movies and verify both pickers. Episodes and other TV tabs should retain native behavior.
+
+If JellyTweaks is installed, its default library page-size override must also be zero (or disabled). The user confirmed its configured value of 100 was restoring pagination on reload; changing that override resolved the conflict.

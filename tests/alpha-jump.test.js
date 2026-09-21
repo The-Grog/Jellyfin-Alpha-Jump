@@ -76,7 +76,20 @@ class FakeElement {
     }
 }
 
-function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM'], pageSize = '0', settingsPatch = {}, renderedCount = 101 } = {}) {
+function createHarness({
+    alphabet = null,
+    loading = false,
+    prefixes = ['AL', 'ZM'],
+    settingsPatch = {},
+    renderedCount = 101,
+    cardCount = renderedCount,
+    userId = 'active-user',
+    library = 'movies',
+    loggedIn = true
+} = {}) {
+    const shows = library === 'series';
+    const pageId = shows ? 'tvshowsPage' : 'moviesPage';
+    const cardSelector = `.card[data-prefix][data-type="${shows ? 'Series' : 'Movie'}"]`;
     const observers = [];
     const scrollCalls = [];
     const settings = {
@@ -89,7 +102,7 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
     };
     const allPrefixes = [...prefixes];
     while (allPrefixes.length < renderedCount) allPrefixes.push(`Q${allPrefixes.length}`);
-    const page = new FakeElement({ selectors: ['#moviesPage'] });
+    const page = new FakeElement({ selectors: ['#' + pageId] });
     const toolbar = new FakeElement({ selectors: ['.MuiToolbar-root'] });
     const chip = new FakeElement({ text: loading ? '∙' : String(allPrefixes.length), selectors: ['.MuiChip-label'] });
     toolbar.childrenBySelector.set('.MuiChip-label', [chip]);
@@ -102,24 +115,25 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
         button.closest = selector => selector.includes('button') ? button : null;
         return button;
     });
-    const cards = allPrefixes.map(prefix => new FakeElement({
+    const cards = allPrefixes.slice(0, cardCount).map(prefix => new FakeElement({
         dataset: { prefix },
-        selectors: ['.card[data-prefix][data-type="Movie"]']
+        selectors: [cardSelector]
     }));
     pickerRoot.childrenBySelector.set('[role="group"].MuiToggleButtonGroup-vertical', [group]);
     group.childrenBySelector.set('button[type="button"][value]', buttons);
     group.contains = node => buttons.includes(node);
     page.childrenBySelector.set('.alphaPicker-fixed-right', [pickerRoot]);
-    page.childrenBySelector.set('.card[data-prefix][data-type="Movie"]', cards);
+    page.childrenBySelector.set(cardSelector, cards);
     page.childrenBySelector.set('.noItemsMessage.centerMessage', []);
 
+    const documentListeners = new Map();
     const body = new FakeElement();
     const head = new FakeElement();
     const document = {
         body,
         head,
         querySelectorAll: selector => {
-            if (selector === '#moviesPage') return [page];
+            if (selector === '#' + pageId) return [page];
             if (selector === '.MuiToolbar-root') return [toolbar];
             if (selector === '[role="banner"], .MuiAppBar-root') return [];
             return [];
@@ -127,17 +141,37 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
         querySelector: selector => selector === '.docspinner.mdlSpinnerActive' ? null : null,
         createElement: () => new FakeElement(),
         createTextNode: text => ({ nodeType: 3, textContent: text }),
-        addEventListener() {},
-        removeEventListener() {}
+        addEventListener(type, callback) { documentListeners.set(type, callback); },
+        removeEventListener(type, callback) { if (documentListeners.get(type) === callback) documentListeners.delete(type); }
     };
     const storage = new Map([
-        ['movies - library', JSON.stringify(settings)],
-        ['libraryPageSize', pageSize]
+        [`${library} - library`, JSON.stringify(settings)]
     ]);
+    const sessionStorage = new Map();
+    let reloads = 0;
+    let activeUserId = userId;
+    let isLoggedIn = loggedIn;
     const root = {
         document,
-        location: { hash: '#/movies?topParentId=library&collectionType=movies' },
-        localStorage: { getItem: key => storage.get(key) || null },
+        location: {
+            hash: shows ? '#/tv?topParentId=library&collectionType=tvshows' : '#/movies?topParentId=library&collectionType=movies',
+            origin: 'http://jellyfin.test',
+            reload: () => { reloads += 1; }
+        },
+        localStorage: {
+            getItem: key => storage.get(key) || null,
+            setItem: (key, value) => storage.set(key, String(value)),
+            removeItem: key => storage.delete(key)
+        },
+        sessionStorage: {
+            getItem: key => sessionStorage.get(key) || null,
+            setItem: (key, value) => sessionStorage.set(key, String(value)),
+            removeItem: key => sessionStorage.delete(key)
+        },
+        ApiClient: {
+            getCurrentUserId: () => activeUserId,
+            isLoggedIn: () => isLoggedIn
+        },
         matchMedia: () => ({ matches: true }),
         getComputedStyle: () => ({ position: 'static' }),
         scrollY: 0,
@@ -167,7 +201,7 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
         const record = { type: 'childList', target, addedNodes: [], removedNodes: [] };
         observers.filter(observer => observer.connected).forEach(observer => observer.callback([record]));
     };
-    const persist = () => storage.set('movies - library', JSON.stringify(settings));
+    const persist = () => storage.set(`${library} - library`, JSON.stringify(settings));
     const setLoading = value => {
         chip.textContent = value ? '∙' : String(allPrefixes.length);
         notify(chip);
@@ -201,20 +235,158 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
         };
     });
     const instance = createAlphaJump(root);
-    return { ...instance, settings, buttons, page, pickerRoot, chip, scrollCalls, setLoading, persist, notify, clickPicker, activateNative };
+    return {
+        ...instance,
+        settings,
+        buttons,
+        page,
+        pickerRoot,
+        chip,
+        scrollCalls,
+        documentListeners,
+        setLoading,
+        persist,
+        notify,
+        clickPicker,
+        activateNative,
+        root,
+        storage,
+        sessionStorage,
+        setUser: value => { activeUserId = value; },
+        setLoggedIn: value => { isLoggedIn = value; },
+        get reloads() { return reloads; }
+    };
 }
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 
-test('production context requires complete rendered results and explicit StartIndex zero', () => {
-    const paged = createHarness({ pageSize: '100' });
-    assert.equal(paged.test.getContext().pageSize, 100);
-    assert.equal(paged.test.hasCompleteUnpaginatedResult(paged.test.getContext()), true);
-    const incomplete = createHarness({ renderedCount: 100 });
+test('production context requires complete rendered cards and explicit StartIndex zero', () => {
+    const complete = createHarness();
+    assert.equal(complete.test.hasCompleteUnpaginatedResult(complete.test.getContext()), true);
+    const incomplete = createHarness({ renderedCount: 101, cardCount: 100 });
     assert.equal(incomplete.test.hasCompleteUnpaginatedResult(incomplete.test.getContext()), false);
     const offset = createHarness({ settingsPatch: { StartIndex: 100 } });
     const context = offset.test.getContext();
     assert.equal(offset.test.hasInitialIndex(context.settings), false);
+});
+
+test('complete small results are supported only when every toolbar item has a card', () => {
+    const complete = createHarness({ renderedCount: 3, cardCount: 3 });
+    const incomplete = createHarness({ renderedCount: 3, cardCount: 2 });
+    const pending = createHarness({ renderedCount: 3, cardCount: 3, loading: true });
+    assert.equal(complete.test.hasCompleteUnpaginatedResult(complete.test.getContext()), true);
+    assert.equal(incomplete.test.hasCompleteUnpaginatedResult(incomplete.test.getContext()), false);
+    assert.equal(pending.test.isReady(pending.test.getContext()), false);
+});
+
+test('auto configuration backs up a missing or explicit active-user preference and reloads once', () => {
+    const missing = createHarness();
+    assert.equal(missing.test.configurePaginationPreference(), 'active-user');
+    assert.equal(missing.storage.get('active-user-libraryPageSize'), '0');
+    assert.equal(missing.reloads, 1);
+    assert.deepEqual(JSON.parse(missing.storage.get(missing.test.backupKey('active-user'))), {
+        version: 1,
+        origin: 'http://jellyfin.test',
+        userId: 'active-user',
+        existed: false,
+        value: null
+    });
+
+    const explicit = createHarness();
+    explicit.storage.set('active-user-libraryPageSize', '250');
+    explicit.test.configurePaginationPreference();
+    assert.equal(explicit.storage.get('active-user-libraryPageSize'), '0');
+    assert.equal(explicit.reloads, 1);
+    assert.equal(JSON.parse(explicit.storage.get(explicit.test.backupKey('active-user'))).value, '250');
+});
+
+test('production init runs automatic configuration through the public active client', () => {
+    const harness = createHarness();
+    harness.init();
+    assert.equal(harness.storage.get('active-user-libraryPageSize'), '0');
+    assert.equal(harness.reloads, 1);
+    assert.equal(harness.root.__alphaJumpPrototypeV1?.config.autoDisablePagination, true);
+});
+
+test('auto configuration uses only the active API-client user key and does nothing for an existing zero', () => {
+    const harness = createHarness();
+    harness.storage.set('other-user-libraryPageSize', '25');
+    harness.storage.set('active-user-libraryPageSize', '0');
+    harness.test.configurePaginationPreference();
+    assert.equal(harness.storage.get('active-user-libraryPageSize'), '0');
+    assert.equal(harness.storage.get('other-user-libraryPageSize'), '25');
+    assert.equal(harness.storage.has(harness.test.backupKey('active-user')), false);
+    assert.equal(harness.reloads, 0);
+});
+
+test('one session never loops or fights a user preference change after setup', () => {
+    const harness = createHarness();
+    harness.test.configurePaginationPreference();
+    harness.storage.set('active-user-libraryPageSize', '100');
+    harness.test.configurePaginationPreference();
+    const reinjected = createAlphaJump(harness.root);
+    reinjected.test.configurePaginationPreference();
+    assert.equal(harness.storage.get('active-user-libraryPageSize'), '100');
+    assert.equal(harness.reloads, 1);
+    assert.equal(JSON.parse(harness.storage.get(harness.test.backupKey('active-user'))).existed, false);
+});
+
+test('authentication, malformed backup, and storage failures leave preferences untouched', () => {
+    const signedOut = createHarness({ loggedIn: false });
+    assert.equal(signedOut.test.configurePaginationPreference(), null);
+    assert.equal(signedOut.storage.has('active-user-libraryPageSize'), false);
+    assert.equal(signedOut.reloads, 0);
+
+    const malformedBackup = createHarness();
+    malformedBackup.storage.set('active-user-libraryPageSize', '100');
+    malformedBackup.storage.set(malformedBackup.test.backupKey('active-user'), '{bad json');
+    malformedBackup.test.configurePaginationPreference();
+    assert.equal(malformedBackup.storage.get('active-user-libraryPageSize'), '100');
+    assert.equal(malformedBackup.reloads, 0);
+
+    const brokenStorage = createHarness();
+    brokenStorage.root.localStorage.getItem = () => { throw new Error('denied'); };
+    brokenStorage.test.configurePaginationPreference();
+    assert.equal(brokenStorage.reloads, 0);
+});
+
+test('user switching and restoration stay scoped to the matching active user', () => {
+    const harness = createHarness();
+    harness.storage.set('active-user-libraryPageSize', '400');
+    harness.test.configurePaginationPreference();
+    harness.setUser('second-user');
+    harness.storage.set('second-user-libraryPageSize', '50');
+    harness.test.configurePaginationPreference();
+    assert.equal(harness.storage.get('active-user-libraryPageSize'), '0');
+    assert.equal(harness.storage.get('second-user-libraryPageSize'), '0');
+    assert.equal(JSON.parse(harness.storage.get(harness.test.backupKey('active-user'))).value, '400');
+    assert.equal(JSON.parse(harness.storage.get(harness.test.backupKey('second-user'))).value, '50');
+
+    assert.equal(harness.test.restorePaginationPreference(), true);
+    assert.equal(harness.storage.get('second-user-libraryPageSize'), '50');
+    assert.equal(harness.storage.get('active-user-libraryPageSize'), '0');
+    const reinjected = createAlphaJump(harness.root);
+    reinjected.test.configurePaginationPreference();
+    assert.equal(harness.storage.get('second-user-libraryPageSize'), '50');
+});
+
+test('restoration removes an originally absent preference and does not reapply in the session', () => {
+    const harness = createHarness();
+    harness.test.configurePaginationPreference();
+    assert.equal(harness.test.restorePaginationPreference(), true);
+    assert.equal(harness.storage.has('active-user-libraryPageSize'), false);
+    const reinjected = createAlphaJump(harness.root);
+    reinjected.test.configurePaginationPreference();
+    assert.equal(harness.storage.has('active-user-libraryPageSize'), false);
+    assert.equal(harness.reloads, 1);
+});
+
+test('an existing zero does not make stale paged cards jump-ready', () => {
+    const harness = createHarness({ renderedCount: 101, cardCount: 100 });
+    harness.storage.set('active-user-libraryPageSize', '0');
+    harness.test.configurePaginationPreference();
+    assert.equal(harness.reloads, 0);
+    assert.equal(harness.test.hasCompleteUnpaginatedResult(harness.test.getContext()), false);
 });
 
 test('# goes through the production native-clear and readiness path before scrolling top', async () => {
@@ -289,4 +461,91 @@ test('production detach removes its listener and only its selection markers', ()
     assert.equal(button.getAttribute('data-alpha-jump-selected'), null);
     assert.equal(button.getAttribute('aria-current'), null);
     assert.equal(button.getAttribute('aria-pressed'), 'false');
+});
+
+test('Shows route uses series settings and Series cards and jumps without native filtering', async () => {
+    const h = createHarness({ library: 'series' });
+    const context = h.test.getContext();
+    assert.equal(context.route.pageId, 'tvshowsPage');
+    assert.equal(context.route.kind, 'series');
+    h.test.attachSurface(context);
+    const event = h.clickPicker('A');
+    await turn();
+    assert.equal(event.prevented, true);
+    assert.equal(h.test.getState().selected, 'A');
+    assert.equal(h.settings.Alphabet, null);
+    h.api.destroy();
+});
+test('Shows non-main tabs and explicit opt-outs remain native', () => {
+    const h = createHarness({ library: 'series' });
+    h.root.location.hash += '&tab=5';
+    assert.equal(h.test.getContext(), null);
+    h.root.location.hash = h.root.location.hash.replace('&tab=5','');
+    h.storage.set('active-user-landing-library','episodes');
+    assert.equal(h.test.getContext(), null);
+    h.root.location.hash += '&tab=0';
+    assert.ok(h.test.getContext());
+    h.api.config.showsEnabled = false;
+    assert.equal(h.test.getContext(), null);
+    h.api.config.showsEnabled = true;
+    h.api.config.moviesOnly = true;
+    assert.equal(h.test.getContext(), null);
+});
+
+for (const library of ['movies', 'series']) {
+    test(library + ': first navigation arms after external toolbar count settles', async () => {
+        const h = createHarness({ library });
+        h.chip.textContent = ''; // Cards mounted before the external count chip settles.
+        h.storage.set('active-user-libraryPageSize', '0');
+        h.init();
+        assert.equal(h.pickerRoot.listeners.has('click'), true);
+        h.setLoading(false);
+        await turn();
+        assert.equal(h.pickerRoot.listeners.has('click'), true);
+        assert.equal(h.clickPicker('A').prevented, true);
+        await turn();
+        assert.equal(h.settings.Alphabet, null);
+        h.api.destroy();
+    });
+}
+
+
+test('first-click recovery intercepts a ready picker even without a mount notification', async () => {
+    const h = createHarness();
+    h.storage.set('active-user-libraryPageSize', '0');
+    h.chip.textContent = '';
+    h.init();
+    h.chip.textContent = '101';
+    h.test.detachSurface(true); // Simulate a missed attachment before the fallback click.
+    const event = { target: h.buttons.find(b => b.value === 'A'), preventDefault() { this.prevented = true; }, stopImmediatePropagation() {} };
+    h.documentListeners.get('click')(event);
+    assert.equal(event.prevented, true);
+    await turn();
+    assert.equal(h.test.getState().selected, 'A');
+    assert.equal(h.settings.Alphabet, null);
+    h.api.destroy();
+    assert.equal(h.documentListeners.has('click'), false);
+});
+
+for (const library of ['movies', 'series']) {
+    test(library + ': first click while count is pending is owned and waits for complete results', async () => {
+        const h = createHarness({ library, loading: true, renderedCount: 8, prefixes: ['KA', 'MA'] });
+        h.storage.set('active-user-libraryPageSize', '0');
+        h.init();
+        const event = h.clickPicker('K');
+        assert.equal(event.prevented, true);
+        await turn();
+        assert.equal(h.scrollCalls.length, 0);
+        assert.equal(h.settings.Alphabet, null);
+        h.setLoading(false);
+        await turn();
+        assert.equal(h.test.getState().selected, 'K');
+        assert.equal(h.scrollCalls.length, 1);
+        h.api.destroy();
+    });
+}
+test('zero preference can own clicks but cannot declare partial cards ready', () => {
+    const h = createHarness({ renderedCount: 101, cardCount: 100 });
+    h.storage.set('active-user-libraryPageSize','0');
+    assert.equal(h.test.isReady(h.test.getContext()),false);
 });

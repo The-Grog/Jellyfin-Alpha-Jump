@@ -6,7 +6,7 @@ Date: 2026-09-20. Source inspected: local Jellyfin Web `v12.1`, `fae41f33eb7cd63
 
 The user accepted a different local experiment from the original pagination scan:
 
-- User manually sets Library page size to `0`.
+- Alpha Jump defaults `autoDisablePagination` to `true`, setting the signed-in user's browser/origin-local Library page size to `0` once and reloading once.
 - Jellyfin natively loads/renders the complete current Movies result.
 - The enhancement intercepts a supported alphabet click and scrolls among those cards.
 - Full-library browser cost is accepted for investigation, but has not passed performance testing.
@@ -15,7 +15,7 @@ This does not establish a continuously scrollable Plex-style experience, a gener
 
 ## Source-verified feasibility
 
-`LibraryPreferences.tsx:25-43` exposes `libraryPageSize`; `en-us.json:819-820` documents zero as disabling pagination and warns of bugs/reduced performance. `userSettings.js:511-527` preserves zero from public `localStorage['libraryPageSize']`, and `utils/items.ts:122-126` turns it into an omitted request limit. `useFetchItems.ts:330-347` still passes `StartIndex`, so zero page size alone cannot prove the first query slice.
+`LibraryPreferences.tsx:25-43` exposes `libraryPageSize`; `en-us.json:819-820` documents zero as disabling pagination and warns of bugs/reduced performance. `userSettings.js:105-134,517-527` passes its current user ID to `appSettings`, and `appSettings.js:6-11,263-273` stores the client-local value under `<userId>-libraryPageSize`; missing values default to 100. `ServerConnections.js:92-99` exposes the active client as `window.ApiClient`, whose public `getCurrentUserId()` is used by Dashboard. `utils/items.ts:122-126` turns zero into an omitted request limit. `useFetchItems.ts:330-347` still passes `StartIndex`, so preference configuration alone cannot prove the first query slice.
 
 For Movies, `useLibrary.tsx:48-59` and `utils/settings.ts:30-32` yield public local-storage key `movies - <parentId>`. `LibraryPage.tsx:13-38` assigns `#moviesPage`; `ItemsView.tsx:186-210` renders Loading while pending, then Cards or `NoItemsMessage`; `AlphabetPicker.tsx:37-88` supplies the native MUI picker. These facts justify the fail-closed support/readiness model in [architecture.md](architecture.md), not a claim that the browser’s served DOM has passed it.
 
@@ -32,12 +32,14 @@ For Movies, `useLibrary.tsx:48-59` and `utils/settings.ts:30-32` yield public lo
 
 ## Fail-closed prerequisites
 
-The enhancement retains native behavior when explicit StartIndex is missing/nonzero; the Movies settings key cannot be read; grid/ascending SortName is absent; the picker/page is ambiguous; the toolbar/card counts do not prove a complete large unpaginated result; or a result has not become ready. It never adjusts server settings or stored user preferences to qualify itself.
+The enhancement retains native behavior when the signed-in identity is unavailable/ambiguous; user-local storage or its matching backup fails; explicit StartIndex is missing/nonzero; the Movies settings key cannot be read; grid/ascending SortName is absent; the picker/page is ambiguous; the toolbar/card counts do not prove a complete rendered result; or a result has not become ready. It never adjusts server settings. It changes only the active user's client-local page-size preference, once per session unless the user explicitly restores it.
+
+Small libraries and constrained results of 100 or fewer are supported only when the numeric toolbar total exactly equals the rendered Movie-card count and no query is pending. A count above 100 is not substitute evidence. An initial native alphabet subset remains native until an alphabet-clear result for that same query has been proven in the current page session.
 
 ### 2026-09-21 served-browser prerequisite result
 
-The authorized Jellyfin 12.1 browser session later confirmed a saved-zero visual state with one `#moviesPage`, one 27-button picker, grid/ascending SortName, explicit `StartIndex: 0`, toolbar total `1,538`, and exactly `1,538` rendered Movie cards. The injected probe still saw no `libraryPageSize` key. The old storage-key gate therefore incorrectly left the enhancement inactive and a native A click reduced the result to 73. The corrected local code replaces that gate with the large complete-render proof; it still needs a fresh served-browser click after the Injector entry is manually updated. Details are in [testing.md](testing.md).
+The authorized Jellyfin 12.1 browser session later confirmed a saved-zero visual state with one `#moviesPage`, one 27-button picker, grid/ascending SortName, explicit `StartIndex: 0`, toolbar total `1,538`, and exactly `1,538` rendered Movie cards. The injected probe still saw no unprefixed `libraryPageSize` key. That was a real defect in the old implementation, not absence of the client-local preference: source shows the active-user-prefixed key. The corrected local code uses the verified key solely for guarded configuration and uses toolbar/card equality for arming. It still needs a fresh served-browser test after the Injector entry is manually updated. Details are in [testing.md](testing.md).
 
 ## Decision
 
-The local code is suitable for review and controlled console testing once an authorized tab is configured with page size zero and that state remains active. It is not ready for JavaScript Injector installation: page-size persistence, served-DOM gating, native-clear timing, network parameters, performance, and Enhanced coexistence still need evidence.
+The local code is suitable for review and a controlled temporary-browser trial. That trial will change the signed-in user's browser/origin-local library page-size setting and reload once; a console copy must be pasted again afterward. It is not ready for general JavaScript Injector installation: automatic preference application/restoration, served-DOM gating, native-clear timing, network parameters, performance, and Enhanced coexistence still need evidence.

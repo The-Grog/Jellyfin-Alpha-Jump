@@ -1,11 +1,11 @@
 /*
- * Jellyfin Alpha Jump prototype for Jellyfin Web 12.1 modern Movies.
+ * Jellyfin Alpha Jump prototype for Jellyfin Web 12.1 modern Movies and Shows.
  *
- * This is deliberately a browser-only DOM enhancement. It requires the user's
- * Library page size preference to be 0; it never changes that setting and it
- * never requests items itself. The served Web client need not expose that
- * preference through localStorage, so arming is proven from the rendered
- * result instead of trusting an implementation-detail storage key.
+ * This is deliberately a browser-only DOM enhancement. By default it sets the
+ * signed-in user's browser-local Library page-size preference to 0 once, then
+ * reloads once so Jellyfin can apply it. It never requests items itself.
+ * Configuration is separate from arming: only rendered card/toolbar evidence
+ * proves that the current result is complete enough to jump within.
  */
 (function bootstrapAlphaJump(factory) {
     if (typeof window === 'undefined' && typeof module === 'object' && module.exports) {
@@ -24,7 +24,11 @@
     const doc = root.document;
     const CONFIG = {
         enabled: true,
-        moviesOnly: true,
+        // Alpha Jump is designed around Jellyfin's documented zero-page-size
+        // mode. This preference is local to the signed-in user and this origin.
+        autoDisablePagination: true,
+        moviesOnly: false,
+        showsEnabled: true,
         smoothScroll: true,
         debug: false,
         respectSortOrder: true,
@@ -56,7 +60,12 @@
         popState: null,
         keyDown: null,
         confirmedUnpaginatedQueryId: null,
-        confirmedUnpaginatedTotal: null
+        confirmedUnpaginatedTotal: null,
+        activeUserId: null,
+        preferenceHandledUsers: new Set(),
+        reportedPreferenceProblems: new Set(),
+        loadListener: null,
+        firstPickerClick: null
     };
 
     function log(...args) {
@@ -84,39 +93,226 @@
         const path = (splitAt < 0 ? hash : hash.slice(0, splitAt)).toLowerCase();
         const params = new URLSearchParams(splitAt < 0 ? '' : hash.slice(splitAt + 1));
         const parentId = params.get('topParentId');
+        const isMovies = path === '#/movies' && params.get('collectionType') === 'movies';
+        const isShows = path === '#/tv' && params.get('collectionType') === 'tvshows';
+        const kind = isMovies ? 'movies' : isShows ? 'series' : null;
+        // Match useCurrentTab's explicit tab or browser-local landing preference.
+        const tab = params.get('tab');
+        let mainTab = tab === '0';
+        if (tab === null && kind) {
+            const userId = currentUserId();
+            try {
+                const landing = userId ? root.localStorage.getItem(userId + '-landing-' + parentId) : null;
+                mainTab = !!userId && (!landing || landing === kind);
+            } catch {
+                mainTab = false;
+            }
+        }
         return {
-            hash,
-            parentId,
-            isMovies: /(?:^|\/)movies(?:$|\/)/.test(path) && params.get('collectionType') === 'movies'
+            hash, parentId, isMovies, isShows, kind,
+            supported: !!kind && mainTab && (!isShows || (CONFIG.showsEnabled && !CONFIG.moviesOnly)),
+            pageId: isShows ? 'tvshowsPage' : 'moviesPage',
+            itemType: isShows ? 'Series' : 'Movie'
         };
     }
 
-    // v12.1 getSettingsKey(LibraryTab.Movies, parentId) produces this lowercase key.
+    // v12.1 uses lowercase Movies/Series tab values in the view settings key.
     function readViewSettings(route) {
         if (!route.parentId) return null;
         try {
-            const raw = root.localStorage.getItem(`movies - ${route.parentId}`);
+            const raw = root.localStorage.getItem(`${route.kind} - ${route.parentId}`);
             return raw ? JSON.parse(raw) : null;
         } catch (caught) {
-            reportError('Could not read Movies view settings.', caught);
+            reportError('Could not read library view settings.', caught);
             return null;
         }
     }
 
-    // userSettings.libraryPageSize() reads this unprefixed local-storage key with
-    // enableOnServer=false and returns 100 when it is absent or malformed.
-    function readLibraryPageSize() {
+    function originKey() {
+        return typeof root.location?.origin === 'string' && root.location.origin
+            ? root.location.origin
+            : null;
+    }
+
+    // v12.1 ServerConnections.setLocalApiClient assigns the signed-in client to
+    // window.ApiClient. Dashboard's public getCurrentUserId() delegates to this
+    // same method. Do not infer a user from localStorage names or library IDs.
+    function currentUserId() {
+        const client = root.ApiClient;
+        if (!client || typeof client.getCurrentUserId !== 'function') return null;
         try {
-            const raw = root.localStorage.getItem('libraryPageSize');
-            return raw === '0' ? 0 : Number.parseInt(raw || '', 10) || 100;
+            if (typeof client.isLoggedIn === 'function' && !client.isLoggedIn()) return null;
+            const userId = client.getCurrentUserId();
+            return typeof userId === 'string' && userId.trim() ? userId : null;
         } catch (caught) {
-            reportError('Could not read Library page size.', caught);
+            reportPreferenceProblem('identity', 'Alpha Jump could not identify the signed-in Jellyfin user.', caught);
             return null;
         }
     }
 
-    function getPage() {
-        const pages = Array.from(doc.querySelectorAll('#moviesPage'));
+    function preferenceKey(userId) {
+        return `${userId}-libraryPageSize`;
+    }
+
+    function scopedKey(name, userId) {
+        const origin = originKey();
+        return origin ? `alpha-jump:v1:${name}:${origin}:${encodeURIComponent(userId)}` : null;
+    }
+
+    function backupKey(userId) {
+        return scopedKey('library-page-size-backup', userId);
+    }
+
+    function handledKey(userId) {
+        return scopedKey('library-page-size-handled', userId);
+    }
+
+    function reportPreferenceProblem(code, message, caught) {
+        if (state.reportedPreferenceProblems.has(code)) return;
+        state.reportedPreferenceProblems.add(code);
+        // This is an actual configuration failure, so it remains visible with
+        // debug disabled. Do not include user IDs, tokens, or storage values.
+        reportError(message, caught || '');
+    }
+
+    function readJson(storage, key) {
+        if (!storage || !key) return null;
+        const raw = storage.getItem(key);
+        return raw == null ? null : JSON.parse(raw);
+    }
+
+    function writeJson(storage, key, value) {
+        if (!storage || !key) throw new Error('storage is unavailable');
+        storage.setItem(key, JSON.stringify(value));
+    }
+
+    function readBackup(userId) {
+        const key = backupKey(userId);
+        const backup = readJson(root.localStorage, key);
+        if (backup == null) return null;
+        if (backup.version !== 1 || backup.origin !== originKey() || backup.userId !== userId
+            || typeof backup.existed !== 'boolean'
+            || (backup.existed && typeof backup.value !== 'string')) {
+            throw new Error('backup record is malformed or belongs to another user');
+        }
+        return backup;
+    }
+
+    function preserveBackup(userId, value) {
+        const existing = readBackup(userId);
+        if (existing) return existing;
+        const backup = {
+            version: 1,
+            origin: originKey(),
+            userId,
+            existed: value !== null,
+            value: value === null ? null : value
+        };
+        writeJson(root.localStorage, backupKey(userId), backup);
+        return backup;
+    }
+
+    function sessionValue(userId, keyForUser) {
+        try {
+            return root.sessionStorage?.getItem(keyForUser(userId)) || null;
+        } catch (caught) {
+            reportPreferenceProblem('session-storage', 'Alpha Jump could not track its one-time page-size setup attempt.', caught);
+            return null;
+        }
+    }
+
+    function setSessionValue(userId, keyForUser, value) {
+        root.sessionStorage?.setItem(keyForUser(userId), value);
+    }
+
+    function resetForUserChange(userId) {
+        if (state.activeUserId === userId) return;
+        cancelRun('Cancelled: signed-in user changed.', false);
+        clearSelection();
+        detachSurface(true);
+        state.confirmedUnpaginatedQueryId = null;
+        state.confirmedUnpaginatedTotal = null;
+        state.activeUserId = userId;
+    }
+
+    // This writes only Jellyfin's verified client-local key. Jellyfin's normal
+    // display-settings UI calls userSettings.libraryPageSize(), which delegates
+    // to appSettings.set('libraryPageSize', value, currentUserId) and produces
+    // exactly this key. A reload is needed because the existing ItemsView query
+    // was already created with the prior page-size preference.
+    function configurePaginationPreference() {
+        const userId = currentUserId();
+        if (!userId) {
+            if (routeInfo().supported) {
+                reportPreferenceProblem('identity-unavailable', 'Alpha Jump is waiting for Jellyfin authentication and will leave native behavior available until the signed-in user is known.');
+            }
+            return null;
+        }
+        resetForUserChange(userId);
+        if (!CONFIG.autoDisablePagination || state.preferenceHandledUsers.has(userId)) return userId;
+
+        const origin = originKey();
+        if (!origin || !root.localStorage || !root.sessionStorage) {
+            reportPreferenceProblem('storage-unavailable', 'Alpha Jump could not access browser storage for the signed-in user. Native behavior remains available.');
+            return userId;
+        }
+
+        try {
+            const status = sessionValue(userId, handledKey);
+            const raw = root.localStorage.getItem(preferenceKey(userId));
+            if (raw === '0') {
+                state.preferenceHandledUsers.add(userId);
+                if (!status) setSessionValue(userId, handledKey, 'already-zero');
+                return userId;
+            }
+            // A page-size change after Alpha Jump has run is a user decision for
+            // this session. Re-injection and SPA lifecycle work must not fight it.
+            if (status) {
+                state.preferenceHandledUsers.add(userId);
+                if (status === 'reload-attempted') {
+                    reportPreferenceProblem('reload-failed', 'Alpha Jump set Library page size to zero but it was not available after its one reload. Native behavior remains available; change the setting in Jellyfin Display settings and reload manually.');
+                }
+                return userId;
+            }
+            preserveBackup(userId, raw);
+            root.localStorage.setItem(preferenceKey(userId), '0');
+            if (root.localStorage.getItem(preferenceKey(userId)) !== '0') {
+                throw new Error('write verification failed');
+            }
+            state.preferenceHandledUsers.add(userId);
+            setSessionValue(userId, handledKey, 'reload-attempted');
+            if (typeof root.location?.reload !== 'function') throw new Error('reload is unavailable');
+            root.location.reload();
+        } catch (caught) {
+            state.preferenceHandledUsers.add(userId);
+            reportPreferenceProblem('configuration', 'Alpha Jump could not set the signed-in user\'s Library page size to zero. Native behavior remains available.', caught);
+        }
+        return userId;
+    }
+
+    function restorePaginationPreference() {
+        const userId = currentUserId();
+        if (!userId) {
+            reportPreferenceProblem('restore-identity', 'Alpha Jump could not identify the signed-in Jellyfin user for restoration.');
+            return false;
+        }
+        try {
+            const backup = readBackup(userId);
+            if (!backup) throw new Error('no Alpha Jump backup exists for this user and origin');
+            const key = preferenceKey(userId);
+            if (backup.existed) root.localStorage.setItem(key, backup.value);
+            else root.localStorage.removeItem(key);
+            setSessionValue(userId, handledKey, 'restored');
+            state.preferenceHandledUsers.add(userId);
+            return true;
+        } catch (caught) {
+            reportPreferenceProblem('restore', 'Alpha Jump could not restore this signed-in user\'s original Library page-size preference.', caught);
+            return false;
+        }
+    }
+
+    function getPage(route) {
+        const pages = Array.from(doc.querySelectorAll('#' + route.pageId));
         return pages.length === 1 ? pages[0] : null;
     }
 
@@ -135,8 +331,8 @@
         return pressed.length === 1 ? pressed[0].value : null;
     }
 
-    function cardsIn(page) {
-        return Array.from(page.querySelectorAll('.card[data-prefix][data-type="Movie"]'));
+    function cardsIn(page, route) {
+        return Array.from(page.querySelectorAll(`.card[data-prefix][data-type="${route.itemType}"]`));
     }
 
     // LibraryToolbar is rendered by AppLayout, outside the Page/#moviesPage
@@ -168,32 +364,38 @@
     }
 
     function hasConfirmedNativeAlphabetSubset(context) {
-        // A <=100 result is ambiguous by itself: it could be an ordinary
-        // paged response with no pager. It is safe only when this exact query
-        // was already observed as a large, fully rendered, alphabet-clear
-        // result in this page session. queryIdentity deliberately omits
+        // An already active native alphabet is safe only when this exact query
+        // was already observed as a fully rendered, alphabet-clear result in
+        // this page session. queryIdentity deliberately omits
         // Alphabet but retains every other persisted filter/sort setting.
         return state.confirmedUnpaginatedQueryId === context.queryId
             && renderedCardsMatchToolbarTotal(context);
     }
 
     function hasCompleteUnpaginatedResult(context) {
-        // A missing localStorage key was observed in the served v12.1 client
-        // despite the page-size-zero UI setting being active. Do not guess from
-        // the absence of pager buttons: a normal <=100-result query has none.
-        // Instead require a large result whose toolbar total equals the number
-        // of renderer-owned Movie cards currently in the DOM.
-        const total = renderedResultCount(context.toolbar);
+        // Page-size configuration is not evidence that the existing view was
+        // re-queried. A toolbar total exactly matching renderer-owned Movie
+        // cards proves this result is complete, including small libraries and
+        // filtered results of 100 or fewer. A count above 100 by itself proves
+        // neither the preference nor completeness.
         return context.alphabetClear
-            ? Number.isInteger(total) && total > 100 && context.cards.length === total
+            ? renderedCardsMatchToolbarTotal(context)
             : hasConfirmedNativeAlphabetSubset(context);
+    }
+
+    function hasSavedUnpaginatedPreference() {
+        const userId = currentUserId();
+        if (!userId) return false;
+        try { return root.localStorage.getItem(preferenceKey(userId)) === '0'; }
+        catch { return false; }
     }
 
     function hasPotentialUnpaginatedResult(context) {
         // While the query-specific toolbar bullet is present, its count chip is
-        // intentionally replaced. Keep an already full rendered result eligible
-        // only long enough for waitForReady() to observe the new settled count.
-        return state.confirmedUnpaginatedQueryId === context.queryId
+        // intentionally replaced. Keep a previously confirmed query eligible
+        // only long enough for waitForReady() to observe its new settled count.
+        return hasSavedUnpaginatedPreference()
+            || state.confirmedUnpaginatedQueryId === context.queryId
             || (context.loading
                 ? context.cards.length > 100
                 : hasCompleteUnpaginatedResult(context));
@@ -205,13 +407,12 @@
         return Number.isInteger(settings.StartIndex) && settings.StartIndex === 0;
     }
 
-    function queryIdentity(route, settings, pageSize) {
+    function queryIdentity(route, settings) {
         const querySettings = { ...settings };
         delete querySettings.Alphabet;
         return JSON.stringify(canonical({
             hash: route.hash,
             parentId: route.parentId,
-            pageSize,
             settings: querySettings
         }));
     }
@@ -231,32 +432,30 @@
 
     function getContext() {
         const route = routeInfo();
-        const page = getPage();
-        if (!route.isMovies || !page) return null;
+        const page = getPage(route);
+        if (!route.supported || !page) return null;
         const settings = readViewSettings(route);
         const picker = findPicker(page);
         const toolbar = findLibraryToolbar();
-        const pageSize = readLibraryPageSize();
-        if (!settings || !picker || !toolbar || pageSize === null) return null;
-        const cards = cardsIn(page);
+        if (!settings || !picker || !toolbar) return null;
+        const cards = cardsIn(page, route);
         return {
             route,
             page,
             settings,
             picker,
             toolbar,
-            pageSize,
             cards,
             empty: !!page.querySelector('.noItemsMessage.centerMessage'),
             loading: hasLoadingMarker(toolbar),
             alphabetClear: isAlphabetClear(settings, picker),
-            queryId: queryIdentity(route, settings, pageSize)
+            queryId: queryIdentity(route, settings)
         };
     }
 
     function isPotentiallySupported(context) {
         return !!context
-            && (!CONFIG.moviesOnly || context.route.isMovies)
+            && context.route.supported
             && hasPotentialUnpaginatedResult(context)
             && hasInitialIndex(context.settings)
             && context.settings.ViewMode === 'grid'
@@ -270,6 +469,7 @@
         return isPotentiallySupported(context)
             && context.alphabetClear
             && !context.loading
+            && renderedCardsMatchToolbarTotal(context)
             && (context.cards.length > 0 || context.empty);
     }
 
@@ -553,7 +753,7 @@
             } else if (current && /timeout/.test(String(caught?.message))) {
                 announce(current, 'Search incomplete: Jellyfin results did not settle.', false);
             } else {
-                reportError('Could not prepare Movies results.', caught);
+                reportError('Could not prepare library results.', caught);
                 if (current) announce(current, 'Alpha Jump could not prepare these results.', false);
             }
         }
@@ -574,7 +774,7 @@
         event.stopImmediatePropagation();
         const value = button.value;
         if ((value === '#' || (state.selected === value && state.selectedQueryId === context.queryId))
-            && context.alphabetClear && !state.run) {
+            && isReady(context) && !state.run) {
             clearSelection();
             scrollTop();
             announce(context, 'At the beginning.', false);
@@ -628,9 +828,13 @@
 
     function refreshSurface() {
         if (state.destroyed) return;
+        const userId = configurePaginationPreference();
+        if (!userId) {
+            resetForUserChange(null);
+            return;
+        }
         const context = getContext();
-        if (context && context.alphabetClear && renderedCardsMatchToolbarTotal(context)
-            && renderedResultCount(context.toolbar) > 100) {
+        if (context && context.alphabetClear && renderedCardsMatchToolbarTotal(context)) {
             state.confirmedUnpaginatedQueryId = context.queryId;
             state.confirmedUnpaginatedTotal = renderedResultCount(context.toolbar);
         }
@@ -660,10 +864,15 @@
             // newly supported state must be reconsidered even when #moviesPage
             // was not added or removed.
             const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
-            if (target?.closest?.('#moviesPage')) return true;
+            if (target?.closest?.('#moviesPage, #tvshowsPage')) return true;
+            // The count toolbar is outside the library page. It can settle after
+            // the cards mount, while no surface-specific observer is attached yet.
+            if (target?.matches?.('.MuiChip-label') || target?.closest?.('.MuiToolbar-root')) return true;
             return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(node => {
                 if (node.nodeType !== 1) return false;
-                return node.id === 'moviesPage' || !!node.querySelector?.('#moviesPage');
+                return node.id === 'moviesPage' || node.id === 'tvshowsPage'
+                    || node.matches?.('.MuiToolbar-root, .MuiChip-label')
+                    || !!node.querySelector?.('#moviesPage, #tvshowsPage, .MuiToolbar-root, .MuiChip-label');
             });
         });
     }
@@ -676,6 +885,7 @@
             scheduleLifecycle();
         };
         state.popState = state.hashChange;
+        state.loadListener = () => scheduleLifecycle();
         state.keyDown = event => {
             if (event.key === 'Escape' && state.run) {
                 event.preventDefault();
@@ -684,13 +894,27 @@
         };
         root.addEventListener('hashchange', state.hashChange);
         root.addEventListener('popstate', state.popState);
+        root.addEventListener('load', state.loadListener, { once: true });
         doc.addEventListener('keydown', state.keyDown, true);
+        // Recover a missed first mount synchronously before React handles a letter.
+        // Existing surface listeners still own normal clicks and native-clear bypass.
+        state.firstPickerClick = event => {
+            const button = event.target.closest?.('.alphaPicker-fixed-right button[value]');
+            if (!button || !LETTERS.has(button.value) || state.picker?.group.contains(button)) return;
+            refreshSurface();
+            if (state.picker?.group.contains(button)) onPickerClick(event);
+        };
+        doc.addEventListener('click', state.firstPickerClick, true);
         // This observer only finds insertion/removal of the active Movies page;
         // card discovery and result observation remain scoped to #moviesPage.
+        // It also wakes configuration when public ApiClient identity appears or
+        // changes during SPA login/logout; it does not poll or patch that API.
         state.mountObserver = new root.MutationObserver(records => {
-            if (pageWasAddedOrRemoved(records)) scheduleLifecycle();
+            if (pageWasAddedOrRemoved(records) || currentUserId() !== state.activeUserId) {
+                scheduleLifecycle();
+            }
         });
-        state.mountObserver.observe(doc.body, { childList: true, subtree: true });
+        state.mountObserver.observe(doc.body, { childList: true, subtree: true, characterData: true });
         refreshSurface();
         root[INSTANCE_KEY] = api;
         log('initialized');
@@ -706,14 +930,21 @@
         state.mountObserver = null;
         root.removeEventListener('hashchange', state.hashChange);
         root.removeEventListener('popstate', state.popState);
+        root.removeEventListener('load', state.loadListener);
         doc.removeEventListener('keydown', state.keyDown, true);
+        doc.removeEventListener('click', state.firstPickerClick, true);
         state.style?.remove();
         state.style = null;
         if (root[INSTANCE_KEY] === api) delete root[INSTANCE_KEY];
         log(reason);
     }
 
-    const api = { config: CONFIG, destroy, refresh: scheduleLifecycle };
+    const api = {
+        config: CONFIG,
+        destroy,
+        refresh: scheduleLifecycle,
+        restorePagination: restorePaginationPreference
+    };
     // Node's focused regression tests receive only deterministic helpers. The
     // injected browser instance does not expose these test hooks.
     const test = {
@@ -721,6 +952,7 @@
         renderedResultCount,
         hasCompleteUnpaginatedResult,
         hasPotentialUnpaginatedResult,
+        isReady,
         hasInitialIndex,
         hasSupportedSort,
         isPotentialSnapshot: snapshot => snapshot.completeUnpaginatedResult === true
@@ -728,6 +960,11 @@
             && snapshot.settings.ViewMode === 'grid'
             && hasSupportedSort(snapshot.settings),
         queryIdentity,
+        currentUserId,
+        preferenceKey,
+        backupKey,
+        configurePaginationPreference,
+        restorePaginationPreference,
         removeSelectionMarkers,
         getContext,
         attachSurface,
