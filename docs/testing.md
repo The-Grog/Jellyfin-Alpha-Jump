@@ -1,54 +1,48 @@
-# Alpha Jump prototype testing record
+# Alpha Jump test record
 
-Date: 2026-09-20
+Date: 2026-09-20 to 2026-09-21. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
 
-## What was actually run
+Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
+
+## Actually run
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| Required project documents and R1–R6 were read | Passed | `PROJECT-MILESTONES.md`, `docs/feasibility.md` reviewed before implementation. |
-| Pinned source inspection | Passed | Local `jellyfin-web-v12.1` package reports 12.1.0; feasibility records clean tag `v12.1` / `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Relevant source paths are cited in `docs/architecture.md`. |
-| Browser test environment discovery | Blocked | The authorized in-app browser had no open test tab. No live server was opened, injected, restarted, or changed. |
-| Syntax/static check | Passed | `node --check src\\alpha-jump.js` and focused static regression assertions for all pre-browser review rounds completed successfully on 2026-09-20. `git diff --check` also completed successfully (line-ending warnings only). This does not replace browser behavior tests. |
+| Pinned source inspection | Passed | Local `jellyfin-web-v12.1` is tag `v12.1` / `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Source paths and semantics are recorded in [architecture.md](architecture.md). |
+| Syntax | Passed | `node --check src/alpha-jump.js` completed on 2026-09-20. |
+| Focused production-path regressions | Passed | On 2026-09-21, `node --check src/alpha-jump.js` and `node --test tests/alpha-jump.test.js` passed: 6 passed, 0 failed. A minimal fake DOM drives the actual context, complete-render gate, picker capture/native-clear, `execute`, `waitForReady`, cancellation, query-change, and detach code paths. It does not establish browser compatibility. |
+| Whitespace/diff check | Passed | `git diff --check` completed on 2026-09-20 with no whitespace errors (Git printed only repository line-ending warnings). |
+| Served Movies DOM | Observed | Movies rendered one `#moviesPage`, one native alphabet picker with 27 buttons, one candidate LibraryToolbar, grid cards carrying `data-prefix`, and an unfiltered total of 1,538. The normal session state was `1-100 of 1,538`, Previous disabled / Next enabled. |
+| Injector delivery | Observed | A temporary authenticated probe ran only after an actual browser reload. A same-document SPA route change is not a substitute for the Injector's required browser refresh after configuration changes. |
+| Saved-zero served shape | Observed | Movies showed toolbar total `1,538`, no Previous/Next pager, one picker, and `1,538` `#moviesPage .card[data-prefix][data-type="Movie"]` elements. The active injected probe nevertheless reported `pageSize: null`; the served storage key is not a reliable arming input. |
+| Page-size UI location and persistence | Observed, user action needed | The served UI is **User Menu → Settings → Display → Libraries → Library page size**. It showed `100` and has a separate Save button. A developer-storage change to zero did not survive a hard refresh; the prototype never writes that key. Set the UI control to `0`, click Save, return to Movies, and do not refresh before the next arm test. |
+| A click with the stale Injector copy | Failed — implementation defect found | In the saved-zero state, the existing `AJ test` copy still used the `libraryPageSize` guard. Clicking A applied Jellyfin's native alphabet filter (toolbar/card count became 73; native A was pressed; no Alpha Jump feedback or marker). Local code now uses the observed complete-render proof instead. JavaScript Injector's Import accepts exported JSON, not a standalone `.js`, so its old entry was not overwritten automatically. |
 
-No browser behavior below has been marked passed. In particular, source review is not a substitute for an actual control/event/load test.
+The controlled browser run has started, but no enhancement-controlled letter click, network-parameter validation, full-card-count validation, or performance result has passed yet. Earlier 100-item pagination observations cannot validate the unpaginated architecture.
 
-## Required browser checklist
+## Required controlled browser run
 
-Use an authorized disposable test session with Jellyfin Server/Web version, browser version, injector version, and Jellyfin Enhanced state recorded first. Observe DevTools Network and console; do not test by installing into production.
+Record Server version, served Web asset/version, browser/version, JavaScript Injector version/state, Jellyfin Enhanced version/state, initial `libraryPageSize`, `movies - <parentId>` settings, and the exact local commit or working-tree diff. Do not save credentials, tokens, or unsanitized HAR files.
 
-| Scenario | Expected evidence | Status |
+| Scenario | Evidence needed | Status |
 | --- | --- | --- |
-| Initial support guard | Only modern Movies, exact ascending SortName, one picker, cards, and icon-identified pager arm. Unsupported sort/layout stays entirely native. | Not run |
-| List-view regression | With persisted `ViewMode: "list"`, no picker click is intercepted. Grid with cards and grid with Jellyfin's actual empty-result message remain eligible. | Not run |
-| Pointer and keyboard alphabet activation | A supported click/Enter/Space does not issue `nameStartsWith`/`nameLessThan`; no unrelated picker or app control is suppressed. | Not run |
-| Existing native alphabet | The selected native button clears once through Jellyfin; stored `Alphabet` becomes null, then the full constrained list is scanned. | Not run |
-| Z → A | Start at a late page, request A, confirm native Previous returns page one before scan and the first full-query A is selected. | Not run |
-| Group spanning pages | Arrange a letter (for example M) across two pages; confirm first M on the first matching page wins. | Not run |
-| Pending/placeholder/final page | Simulate slow fetch/cache placeholder/error. Confirm the initial page settles before scanning; pending bullet, missing cards without `NoItemsMessage`, and disabled buttons do not end the scan; final disabled Next only ends after a settled page. | Not run |
-| Rapid request / route exit | A→Z→M and navigate away while loading. Only M may complete; stale completions do not scroll or restore. | Not run |
-| Latest request while loading | Click a second letter while cards are temporarily absent during an enhancement-owned replacement. The second request supersedes; no native alphabet filter is applied. | Not run |
-| Sort/filter/search change | Change each during a scan. It cancels and never restores into the changed query; non-alphabet constraints remain in the network request. | Not run |
-| User paging | Click native Previous/Next during a run. Script cancels and ordinary Jellyfin paging continues. | Not run |
-| # and selected re-click | `#` reaches page one without native alphabet state. Re-clicking selected enhancement letter returns page one and clears local selection. | Not run |
-| Same-card native clear | In a library/query where every result starts with the current native letter, clear succeeds after `Alphabet: null`/page-zero evidence even though card IDs are unchanged. | Not run |
-| Idle query change | Complete an M jump, then change a filter/search/sort and click M. The second click starts a new M search rather than toggling the old selection. | Not run |
-| Missing, empty, non-alpha titles | Missing letter announces absence only after settled end; empty list settles without a card; numerals/punctuation and non-ASCII/custom SortName behavior is documented rather than guessed. | Not run |
-| Budgets and restoration | Exhaust time/action budget in scanning and restoration. Message says incomplete, not missing; restoration is bounded and best effort. | Not run |
-| Stalled progress | Cause unrelated page DOM churn while start index, cards, pending state, native alphabet, empty marker, and Previous state remain unchanged. `maxNoProgressMs` must still stop the transition. | Not run |
-| Duplicate injection and SPA round-trip | Reinject, Movies→detail→Movies, Movies→Home→Movies. Exactly one active picker listener/observer surface and no stale local selection. | Not run |
-| Visual/accessibility | Narrow and desktop view, sticky header, reduced motion, status/cancel, Escape, playback, card selection, menus, and Jellyfin Enhanced enabled/disabled. | Not run |
-| Enhancement selection | After a successful jump, selected letter is visibly marked and exposes `aria-current="true"`; native `aria-pressed`/stored Alphabet remain unchanged. | Not run |
-| Marker cleanup | Change to an unsupported sort, navigate away, and call destroy. The old picker has no `alpha-jump-selected`, `data-alpha-jump-selected`, or `aria-current` marker. | Not run |
-| Cancel feedback | Start a long jump and click the status Cancel button. Pending “Finding…” text and its Cancel button are replaced by a non-busy cancellation status. | Not run |
+| Arm prerequisite | Page size zero, explicit StartIndex zero, grid, ascending SortName, and `#moviesPage` exist; `window.__alphaJumpPrototypeV1` is present after temporary console injection. | Not run |
+| Page-size zero request | DevTools Network shows no item `limit`, `startIndex=0`, preserved non-alphabet filters, and no alphabet parameter during an enhancement jump. | Not run |
+| Page-one / M / Z | A page-one letter, unloaded M, and Z each scroll to the first rendered matching card without native alphabet state. | Not run |
+| Roughly 1,500 titles and rapid scrolling | Record load time, card count/total, scrolling responsiveness, memory/CPU symptoms, and browser recovery. Do not call it acceptable without observed results. | Not run |
+| Native clear | Start with an active native alphabet, including a same-card result; verify ordinary clear, replacement readiness, and retained non-alphabet filters. | Not run |
+| Delayed load + A → Z → M | Artificially throttle if safely available; only M may finish and no native letter filter may slip through while cards are absent. | Not run |
+| Cancel / Escape | Cancel during loading and confirm the status no longer appears busy. | Not run |
+| Query/route changes | Change filter, search, sort, page size, and navigate away during load. Work must cancel, selection markers must clear, and changed query must not receive a stale scroll. | Not run |
+| Unsupported behavior | List view, descending/non-SortName sort, page size nonzero, and nonzero StartIndex retain native picker behavior. | Not run |
+| Missing / empty | Missing letter only reports after ready result; empty result uses the real no-items message; no false result during loading/failure. | Not run |
+| Re-injection / SPA / destroy | Repeat injection, Movies → detail → Movies, then `destroy('testing complete')`, refresh, and verify native picker plus marker cleanup. | Not run |
+| Coexistence | Playback, card click/selection, context menu, keyboard picker activation, sticky headers, reduced motion, and Jellyfin Enhanced enabled/disabled. | Not run |
 
-## Exact next test setup
+## Exact manual procedure
 
-1. Provide or open an authorized non-production Jellyfin 12.1 browser tab containing a Movies library with more than one page and a known cross-page letter group.
-2. Record its Server/Web/browser/Injector/Enhanced versions and preserve a network HAR or screenshots of the ordinary query parameters and page transitions.
-3. Paste `src/alpha-jump.js` only into that session’s DevTools console, perform the checklist in order, and record each outcome here with timestamps and defects.
-4. If source-shaped icon, local-storage, event, or settle assumptions fail, stop the prototype rather than adding React/internal-API workarounds.
-
-## First Firefox runtime finding — 2026-09-20
-
-User-supplied console evidence found the picker and both pager icons, but activation failed because the prototype used an uppercase settings key and a class selector for the page. The actual key is `movies - <parentId>` and the container is `div#moviesPage`. The diagnostic found 80 Movie cards, all with data-prefix. Corrected the key and page/card/empty-result selectors; the lowercase key is also confirmed by upstream LibraryTab.Movies. Re-injection and functional jump behavior remain untested after this correction.
+1. Use a disposable or authorized temporary browser session. In **User Menu → Settings → Display → Libraries**, set **Library page size** to `0` and click **Save**. Return to Movies without refreshing. Do not change server settings.
+2. Open Movies with ascending Name/SortName grid view, clear native alphabet, and record the settings/result count. Confirm all constrained results have rendered before proceeding.
+3. In DevTools, paste the local [src/alpha-jump.js](../src/alpha-jump.js), then set `window.__alphaJumpPrototypeV1.config.debug = true` and verify the instance exists.
+4. Run the table above while observing Network. Record sanitized request URLs/parameters and outcomes here immediately.
+5. Finish with `window.__alphaJumpPrototypeV1?.destroy('testing complete')`, refresh, and verify native alphabet behavior. Do not install through JavaScript Injector unless review accepts the recorded result.

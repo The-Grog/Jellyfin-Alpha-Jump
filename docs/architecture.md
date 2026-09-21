@@ -1,61 +1,66 @@
-# Alpha Jump prototype architecture
+# Unpaginated Alpha Jump architecture
 
-## Boundary
+Date: 2026-09-20. Target source: Jellyfin Web `v12.1`, commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`.
 
-This is a plain injected JavaScript experiment for Jellyfin Web v12.1 modern Movies. It relies on ordinary DOM and browser APIs only. It does not alter Jellyfin source, call a Jellyfin endpoint, manipulate React internals, replace cards, or change playback/normal controls.
+## Source evidence
 
-The supplied checkout is `jellyfin-web` tag `v12.1`, commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Source evidence:
+| Fact | v12.1 evidence | Prototype use |
+| --- | --- | --- |
+| Page size preference | `src/apps/modern/features/preferences/components/LibraryPreferences.tsx:25-43` exposes `libraryPageSize`; source reads unprefixed `localStorage['libraryPageSize']`. In the served authorized session, the page showed the saved-zero unpaginated result while an injected probe saw no such key. | Do not trust the implementation-detail key at runtime. Require a single numeric toolbar total over 100 that equals the count of rendered Movie cards. |
+| Zero disables pagination | `src/strings/en-us.json:819-820` explicitly says zero disables pagination and warns of bugs/reduced performance. `src/apps/modern/features/libraries/components/LibraryToolbar.tsx:75-92,234-241` hides pagination when the value is not positive. | Do not alter the preference; do not look for or use pager controls. |
+| Item request semantics | `src/utils/items.ts:122-126` converts zero to an omitted `limit`; `src/hooks/useFetchItems.ts:330-347` still supplies `startIndex: libraryViewSettings.StartIndex`. | Require persisted `StartIndex === 0` before interpreting cards as the complete constrained result. |
+| Public Movies view settings | `src/apps/modern/features/libraries/hooks/useLibrary.tsx:48-59` uses `getSettingsKey`; `utils/settings.ts:30-32` yields `movies - <parentId>`. | Read, but never write, that public local-storage JSON. |
+| Render and readiness | `ItemsView.tsx:186-210` maps alphabet changes to persisted `Alphabet`/`StartIndex`; it renders `Loading` while pending and otherwise Cards or `NoItemsMessage`. `LoadingComponent.tsx` and `loading.ts` provide the spinner; `LibraryToolbar.tsx:62-92` uses the pending bullet. | Require no native alphabet, no pending marker, and cards or the actual no-items message. |
+| Card/picker identity | `AlphabetPicker.tsx:37-88` renders the MUI toggle group; `LibraryPage.tsx:13-38` gives Movies `#moviesPage`; `src/utils/items.ts:159-183` emits `data-prefix`. | Identify the exact picker shape and match rendered `data-prefix` with `startsWith`. |
 
-- `src/apps/modern/features/libraries/hooks/useLibrary.tsx:36-60` persists a `LibraryViewSettings` object through browser local storage; `utils/settings.ts:30-32` makes the Movies key `movies - <parentId>`.
-- `components/SortButton.tsx:189-203` stores `SortBy`, `SortOrder`, and resets `StartIndex`; `utils/settings.ts:17-27` gives Movies the ascending `SortName` default. `types/library.ts:52-55` defines the required grid value as `ViewMode.GridView = 'grid'`.
-- `components/AlphabetPicker.tsx:15-29,59-70` specifies the picker values and its exclusive native change path. `ItemsView.tsx:186-192` clears to `Alphabet: null` and page zero. `utils/items.ts:128-136` omits alphabet query fields for null.
-- `components/Pagination.tsx:28-42,50-64` defines native Previous/Next start-index movement and the unavoidable top-of-page scroll. `LibraryToolbar.tsx:75-92,234-241` explains page range, pending bullet, and why disabled buttons alone are insufficient.
-- `components/cardbuilder/Card/useCard.ts:52-83,108-111` creates the upper-cased one-to-three-character `data-prefix` from `SortName ?? Name` on card wrappers.
+No private React context, query client, network interception, or independent item request is used.
 
-## Public state contract
+## Support and readiness gates
 
-The script accepts only a route containing `#/movies` and `collectionType=movies`, a `#moviesPage`, exactly one source-shaped picker, exact ascending `SortName`, persisted `ViewMode: 'grid'`, actual Movie cards (or Jellyfin's `.noItemsMessage.centerMessage`), and a source-shaped native pager. List view is not armed. The narrower compatible state deliberately remains available to a one-shot settle observer while Jellyfin temporarily renders its loading component.
+The script reads public inputs:
 
-The non-alphabet query identity is a canonicalized combination of route hash, `topParentId`, and the full persisted Movies setting excluding only `StartIndex` and `Alphabet`. That preserves all filter fields without having to infer them from localized toolbar text. Mutation observation, `hashchange`, `popstate`, and a document bubble-phase click observer re-read that identity; the click observer schedules after React's ordinary click handling and never suppresses native events. A mismatch cancels the run. Script-owned page movements are recognized only while the next settled state has the same identity and moves the stored `StartIndex` in the expected direction; a trusted user pager click cancels immediately.
+1. Route/hash and `#moviesPage` establish Movies scope.
+2. `movies - <topParentId>` establishes `ViewMode`, sort, filters/search-related view state, `Alphabet`, and explicit `StartIndex`.
+3. The numeric toolbar count and rendered Movie-card count prove the currently shown result is a complete large unpaginated result. The UI setting remains the operator prerequisite, but its storage key is not trusted at runtime.
 
-This is source-backed but not yet runtime-proven for every filter/search implementation. The script fails closed when a setting cannot be read or a required element is ambiguous.
+It arms only for grid + ascending `SortName`, explicit initial index zero, and a complete large unpaginated rendered result. A <=100 result is intentionally unsupported because no DOM-only test can distinguish it from a normally paginated query that happens to fit on one page.
 
-## Localized pager and settled-page contract
+Complete-query readiness is deliberately separate from support. It requires:
 
-The pager is not found by `Previous`/`Next` labels. The script requires exactly one `button` containing `svg[data-testid="NavigateBeforeIcon"]` and one containing `svg[data-testid="NavigateNextIcon"]`, sharing a parent in a MUI toolbar. Jellyfin pins MUI 6.5.0, whose [`createSvgIcon`](https://raw.githubusercontent.com/mui/material-ui/v6.5.0/packages/mui-material/src/utils/createSvgIcon.js) supplies `data-testid="${displayName}Icon"`; served-page confirmation remains a runtime compatibility gate.
+- native and stored alphabet state cleared;
+- no Movies toolbar pending bullet; and
+- at least one Movie card, or Jellyfin's `.noItemsMessage.centerMessage`.
 
-After every ordinary pager click, a one-shot `MutationObserver` waits up to `maxPageSettleMs`; it does not poll. Its `maxNoProgressMs` one-shot timer is reset only when a compact relevant-state snapshot changes: start index, card signature, pending marker, native alphabet value, genuine-empty marker, or Previous disabled state. Unrelated DOM mutations cannot perpetually reset the timer. A page is accepted only when:
+This follows the `ItemsView` render branch above. It does not treat missing cards, a disabled control, or a cleared button alone as proof that replacement results are ready. A native clear is allowed to retain the same cards: its evidence is cleared persisted/native alphabet state plus the normal ready branch, not a forced card-signature change.
 
-1. persisted `StartIndex` has the requested value/direction;
-2. the non-alphabet query identity still matches;
-3. the v12.1 pending bullet (`∙`) is absent from the toolbar chip;
-4. Previous is enabled after a nonzero page and disabled at page zero; and
-5. a page change has a new `data-id:data-prefix` signature, or no cards are accompanied by Jellyfin's actual `NoItemsMessage`. The sole same-card exception is native alphabet clear, which additionally requires observed `Alphabet: null` and page zero.
-
-It then confirms once on `requestAnimationFrame`. Only at that point can a disabled Next be treated as the final page; it is never used alone. This contract is intentionally conservative and still requires delayed-response, placeholder, error, and final-page browser evidence.
-
-## Algorithm and cancellation
+## Request flow
 
 ```text
-alphabet click (picker-scoped capture)
-  -> if native alphabet is active, allow exactly its one native deselect click
-  -> return to page 1 with native Previous, under the total budget
-  -> for the requested letter: inspect current card data-prefix values
-       -> first startsWith(letter): sticky-header-aware scroll to that card
-       -> otherwise: settled native Next, repeat
-  -> settled final page without a match: best-effort native restore of start page
+picker click (capture, supported state only)
+  -> prevent native alphabet handler
+  -> latest-request token and accessible “Finding…” state
+  -> existing native alphabet? activate that same button once via bypass
+  -> MutationObserver + one coalesced animation frame await ready state
+  -> first card whose data-prefix startsWith(letter)
+  -> scroll with sticky-header/reduced-motion handling; local selection only
 ```
 
-Every run first uses this settle contract on its current page; `#` and re-clicking the enhancement-selected letter return to page one and scroll to viewport top even if already there. The latter clears enhancement selection. No ordering-based early exit exists because server collation and prefix semantics have not been browser-verified. A run is cancelled on a newer request, route/state identity change, trusted user pager click, Escape, disable, or page-settle failure. It never restores after a query change. All Previous/Next actions share one action/time budget; after exhaustion the result is reported as incomplete.
+`#` and a re-click of the local selected letter skip matching, clear local selection, and scroll to zero. The script never presses Previous/Next, restores a page, counts page actions, or infers end-of-list from a pager.
 
-The picker listener is capture-phase but is attached only to the verified picker group. It prevents the native event only for supported user alphabet clicks. During an enhancement-owned compatible loading state, it also intercepts a newer letter so that request supersedes the run rather than falling through to Jellyfin's native alphabet filter. `nativeClear` permits precisely the script's one selected-button click to reach Jellyfin's ordinary MUI handler; because that clear resets the page, it consumes the same navigation budget. No global event suppression is used.
+The native-clear bypass is limited to the one programmatic click on the currently pressed native button. All other supported alphabet clicks are intercepted; unsupported clicks continue to native Jellyfin. This also prevents a rapid superseding click during a temporary no-card replacement from accidentally applying a native filter.
 
-## Lifecycle and accessibility
+## Lifecycle and cleanup
 
-One global instance key destroys a previous injection before binding a new one. Surface listeners are detached when the Movies surface changes; detachment removes all enhancement-only class/data/`aria-current` markers before releasing the old picker. The persistent observer/hash/click observers merely re-arm a newly rendered supported Movies view. Enhancement selection stores its query identity and is cleared on an idle filter/sort/search identity change, not only during a run. Its scoped outline/weight style and `aria-current="true"` identify the enhancement selection without writing Jellyfin's native `aria-pressed`/Alphabet state. One-shot settle observers disconnect on resolution, cancellation, or timeout. The Cancel button calls the same cancellation path as Escape and replaces pending feedback with a non-busy cancellation status. There is no `setInterval`.
+The active result observer is scoped to `#moviesPage` plus the single source-shaped LibraryToolbar that AppLayout renders outside that page; it only considers card/no-items/pending/picker changes and coalesces each mutation burst to one animation frame. A non-suppressing page-scoped click observer schedules the same check after native toolbar/filter/sort/pager interactions, so a cached same-card query change is still noticed. A small document observer only notices insertion/removal of `#moviesPage` so the result observer can be attached after SPA navigation. It does not discover or rescan cards.
 
-The small feedback element is `role=status` with `aria-live=polite`; pending work exposes an ordinary Cancel button and Escape cancellation. Scrolling honors `prefers-reduced-motion` and accounts for a header/AppBar height. It does not move keyboard focus.
+Each request has an overall timeout and a readiness timeout, both cancellable. A route/hash or query-identity change cancels current work. Query identity contains route, parent, page size, and all persisted view settings except native `Alphabet`; the latter is handled separately because a native clear is expected. It also clears idle enhancement selection after a completed-query change.
 
-## Known uncertainty
+`destroy()` removes capture/key/route listeners, both observers, timeouts/animation frames, feedback, injected style, and only enhancement-owned `alpha-jump-selected`, `data-alpha-jump-selected`, and `aria-current` markers. It does not change Jellyfin's native selection or preferences.
 
-The source proves the contracts above, not a particular injector/browser runtime. It does not prove source MUI icon `data-testid` values, same-document local-storage timing, React capture behavior for pointer and keyboard activation, the full pending/error surface, or collation across custom SortName/non-ASCII titles. Those remain explicit browser test gates rather than reasons to add private hooks.
+## Historical paging experiment
+
+The earlier prototype returned to page one with native Previous and scanned native Next pages. It was accepted only as a visible-transition experiment, then superseded after v12.1 source inspection established page size zero. Its pager discovery, pager activation, page settling, page budgets, and restoration logic have been removed. It is evidence that replacing pagination cannot produce the original continuously scrollable Plex-style experience—not an instruction for this implementation.
+
+## Remaining runtime evidence
+
+Source confirms the request and render paths, but it does not prove served-DOM compatibility, event ordering for browser-generated keyboard clicks, nor full-library performance. Those remain explicit browser checks in [testing.md](testing.md).

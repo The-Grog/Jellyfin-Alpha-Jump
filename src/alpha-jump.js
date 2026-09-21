@@ -1,85 +1,68 @@
 /*
  * Jellyfin Alpha Jump prototype for Jellyfin Web 12.1 modern Movies.
- * Paste this file into an injector only after completing the browser checklist.
- * It intentionally uses only public browser state and ordinary native controls.
+ *
+ * This is deliberately a browser-only DOM enhancement. It requires the user's
+ * Library page size preference to be 0; it never changes that setting and it
+ * never requests items itself. The served Web client need not expose that
+ * preference through localStorage, so arming is proven from the rendered
+ * result instead of trusting an implementation-detail storage key.
  */
-(function alphaJumpPrototype() {
+(function bootstrapAlphaJump(factory) {
+    if (typeof window === 'undefined' && typeof module === 'object' && module.exports) {
+        module.exports = factory;
+        return;
+    }
+    // JavaScript Injector can evaluate a custom script from the document head,
+    // before the parser has created document.body. init() observes the body, so
+    // wait for it rather than failing silently inside the injector's wrapper.
+    const start = () => factory(window).init();
+    if (window.document?.body) start();
+    else window.addEventListener('DOMContentLoaded', start, { once: true });
+}(function createAlphaJump(root) {
     'use strict';
 
+    const doc = root.document;
     const CONFIG = {
         enabled: true,
         moviesOnly: true,
         smoothScroll: true,
         debug: false,
         respectSortOrder: true,
-        // All native page-changing actions: Previous/Next, native-alphabet clear, and restoration.
-        maxNavigationActions: 80,
-        // Includes clearing a native alphabet filter, scanning, and best-effort restoration.
-        maxElapsedMs: 60000,
-        // Per native transition. This is a failure timeout, not a polling cadence.
-        maxPageSettleMs: 8000,
-        // Per native transition: maximum time without relevant pending/settings/card progress.
-        maxNoProgressMs: 4000
+        // Bounds a native alphabet-clear replacement and initial readiness wait.
+        maxReadyWaitMs: 8000,
+        // Bounds a complete request, including the optional native clear.
+        maxElapsedMs: 15000
     };
-
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
     const LOG_PREFIX = '[AlphaJump]';
-
-    if (window[INSTANCE_KEY] && typeof window[INSTANCE_KEY].destroy === 'function') {
-        window[INSTANCE_KEY].destroy('re-injected');
-    }
-
     const state = {
+        destroyed: false,
         selected: null,
         selectedQueryId: null,
-        boundQueryId: null,
-        run: null,
         picker: null,
-        pager: null,
-        observer: null,
+        pickerClick: null,
+        page: null,
+        pageClick: null,
+        pageObserver: null,
+        mountObserver: null,
+        lifecycleFrame: 0,
+        run: null,
+        sequence: 0,
+        nativeBypassButton: null,
         feedback: null,
         style: null,
-        nativeClear: null,
-        destroyed: false,
-        pickerClick: null,
-        pagerClick: null,
         hashChange: null,
         popState: null,
-        keyDown: null,
-        userClick: null
+        keyDown: null
     };
 
     function log(...args) {
         if (CONFIG.debug) console.debug(LOG_PREFIX, ...args);
     }
 
-    function error(...args) {
+    function reportError(...args) {
         console.error(LOG_PREFIX, ...args);
-    }
-
-    function escapeSelector(value) {
-        return window.CSS && CSS.escape ? CSS.escape(value) : value.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-    }
-
-    function routeInfo() {
-        const hash = window.location.hash || '';
-        const splitAt = hash.indexOf('?');
-        const path = (splitAt < 0 ? hash : hash.slice(0, splitAt)).toLowerCase();
-        const params = new URLSearchParams(splitAt < 0 ? '' : hash.slice(splitAt + 1));
-        const parentId = params.get('topParentId');
-        return { hash, path, parentId, isMovies: /(?:^|\/)movies(?:$|\/)/.test(path) && params.get('collectionType') === 'movies' };
-    }
-
-    function readSettings(route) {
-        if (!route.parentId) return null;
-        try {
-            const raw = window.localStorage.getItem(`movies - ${route.parentId}`);
-            return raw ? JSON.parse(raw) : null;
-        } catch (caught) {
-            error('Could not read the public Movies view settings.', caught);
-            return null;
-        }
     }
 
     function canonical(value) {
@@ -93,17 +76,50 @@
         return value;
     }
 
-    // Query identity deliberately excludes pagination and the native alphabet value.
-    // The native alphabet is tracked separately because this prototype clears it first.
-    function queryIdentity(route, settings) {
-        const querySettings = { ...settings };
-        delete querySettings.StartIndex;
-        delete querySettings.Alphabet;
-        return JSON.stringify(canonical({ hash: route.hash, parentId: route.parentId, settings: querySettings }));
+    function routeInfo() {
+        const hash = root.location.hash || '';
+        const splitAt = hash.indexOf('?');
+        const path = (splitAt < 0 ? hash : hash.slice(0, splitAt)).toLowerCase();
+        const params = new URLSearchParams(splitAt < 0 ? '' : hash.slice(splitAt + 1));
+        const parentId = params.get('topParentId');
+        return {
+            hash,
+            parentId,
+            isMovies: /(?:^|\/)movies(?:$|\/)/.test(path) && params.get('collectionType') === 'movies'
+        };
     }
 
-    function findPicker() {
-        const roots = Array.from(document.querySelectorAll('.alphaPicker-fixed-right'));
+    // v12.1 getSettingsKey(LibraryTab.Movies, parentId) produces this lowercase key.
+    function readViewSettings(route) {
+        if (!route.parentId) return null;
+        try {
+            const raw = root.localStorage.getItem(`movies - ${route.parentId}`);
+            return raw ? JSON.parse(raw) : null;
+        } catch (caught) {
+            reportError('Could not read Movies view settings.', caught);
+            return null;
+        }
+    }
+
+    // userSettings.libraryPageSize() reads this unprefixed local-storage key with
+    // enableOnServer=false and returns 100 when it is absent or malformed.
+    function readLibraryPageSize() {
+        try {
+            const raw = root.localStorage.getItem('libraryPageSize');
+            return raw === '0' ? 0 : Number.parseInt(raw || '', 10) || 100;
+        } catch (caught) {
+            reportError('Could not read Library page size.', caught);
+            return null;
+        }
+    }
+
+    function getPage() {
+        const pages = Array.from(doc.querySelectorAll('#moviesPage'));
+        return pages.length === 1 ? pages[0] : null;
+    }
+
+    function findPicker(page) {
+        const roots = Array.from(page.querySelectorAll('.alphaPicker-fixed-right'));
         if (roots.length !== 1) return null;
         const groups = roots[0].querySelectorAll('[role="group"].MuiToggleButtonGroup-vertical');
         if (groups.length !== 1) return null;
@@ -112,60 +128,21 @@
         return { root: roots[0], group: groups[0], buttons };
     }
 
-    function buttonForIcon(testId) {
-        const icons = Array.from(document.querySelectorAll(`svg[data-testid="${escapeSelector(testId)}"]`));
-        const buttons = icons.map(icon => icon.closest('button')).filter(Boolean);
-        return buttons.length === 1 ? buttons[0] : null;
-    }
-
-    // Source v12.1 renders these two MUI icon components inside the pager buttons.
-    // This intentionally does not depend on localized title or visible text.
-    function findPager() {
-        const previous = buttonForIcon('NavigateBeforeIcon');
-        const next = buttonForIcon('NavigateNextIcon');
-        if (!previous || !next || previous === next || previous.parentElement !== next.parentElement) return null;
-        const toolbar = previous.closest('.MuiToolbar-root');
-        if (!toolbar) return null;
-        return { previous, next, toolbar };
-    }
-
-    function cardSignature(cards) {
-        return cards.map(card => `${card.dataset.id || ''}:${card.dataset.prefix || ''}`).join('|');
-    }
-
-    function selectedNativeLetter(picker) {
+    function nativeAlphabet(picker) {
         const pressed = picker.buttons.filter(button => button.getAttribute('aria-pressed') === 'true');
         return pressed.length === 1 ? pressed[0].value : null;
     }
 
-    function hasPendingMarker(pager) {
-        // v12.1's LibraryToolbar emits the literal bullet only while itemsResult.isPending.
-        return Array.from(pager.toolbar.querySelectorAll('.MuiChip-label')).some(node => node.textContent.trim() === '∙');
+    function cardsIn(page) {
+        return Array.from(page.querySelectorAll('.card[data-prefix][data-type="Movie"]'));
     }
 
-    function getContext() {
-        const route = routeInfo();
-        if (!route.isMovies || !document.querySelector('#moviesPage')) return null;
-        const settings = readSettings(route);
-        const picker = findPicker();
-        const pager = findPager();
-        if (!settings || !picker || !pager) return null;
-        const cards = Array.from(document.querySelectorAll('#moviesPage .card[data-prefix][data-type="Movie"]'));
-        const emptyResult = !!document.querySelector('#moviesPage .noItemsMessage.centerMessage');
-        const startIndex = Number(settings.StartIndex || 0);
-        if (!Number.isFinite(startIndex) || startIndex < 0) return null;
-        return {
-            route,
-            settings,
-            picker,
-            pager,
-            cards,
-            emptyResult,
-            cardSignature: cardSignature(cards),
-            startIndex,
-            nativeAlphabet: selectedNativeLetter(picker),
-            queryId: queryIdentity(route, settings)
-        };
+    // LibraryToolbar is rendered by AppLayout, outside the Page/#moviesPage
+    // subtree. In v12.1 Movies it is the one MUI toolbar containing the count chip.
+    function findLibraryToolbar() {
+        const candidates = Array.from(doc.querySelectorAll('.MuiToolbar-root'))
+            .filter(toolbar => toolbar.querySelector('.MuiChip-label'));
+        return candidates.length === 1 ? candidates[0] : null;
     }
 
     function hasSupportedSort(settings) {
@@ -175,87 +152,111 @@
             && settings.SortOrder === 'Ascending';
     }
 
-    function isCompatible(context) {
+    function renderedResultCount(toolbar) {
+        const labels = Array.from(toolbar.querySelectorAll('.MuiChip-label'))
+            .map(node => node.textContent.trim())
+            .filter(text => /^\d[\d,]*$/.test(text));
+        if (labels.length !== 1) return null;
+        return Number.parseInt(labels[0].replaceAll(',', ''), 10);
+    }
+
+    function hasCompleteUnpaginatedResult(context) {
+        // A missing localStorage key was observed in the served v12.1 client
+        // despite the page-size-zero UI setting being active. Do not guess from
+        // the absence of pager buttons: a normal <=100-result query has none.
+        // Instead require a large result whose toolbar total equals the number
+        // of renderer-owned Movie cards currently in the DOM.
+        const total = renderedResultCount(context.toolbar);
+        return Number.isInteger(total)
+            && total > 100
+            && context.cards.length === total;
+    }
+
+    function hasPotentialUnpaginatedResult(context) {
+        // While the query-specific toolbar bullet is present, its count chip is
+        // intentionally replaced. Keep an already full rendered result eligible
+        // only long enough for waitForReady() to observe the new settled count.
+        return context.loading
+            ? context.cards.length > 100
+            : hasCompleteUnpaginatedResult(context);
+    }
+
+    function hasInitialIndex(settings) {
+        // Do not infer zero from a missing persisted field: StartIndex remains in
+        // the item request even when Jellyfin omits limit for page size zero.
+        return Number.isInteger(settings.StartIndex) && settings.StartIndex === 0;
+    }
+
+    function queryIdentity(route, settings, pageSize) {
+        const querySettings = { ...settings };
+        delete querySettings.Alphabet;
+        return JSON.stringify(canonical({
+            hash: route.hash,
+            parentId: route.parentId,
+            pageSize,
+            settings: querySettings
+        }));
+    }
+
+    function isAlphabetClear(settings, picker) {
+        return settings.Alphabet == null && nativeAlphabet(picker) === null;
+    }
+
+    function hasLoadingMarker(toolbar) {
+        const toolbarPending = Array.from(toolbar.querySelectorAll('.MuiChip-label'))
+            .some(node => node.textContent.trim() === '∙');
+        // The global document spinner is not query-specific and is not under the
+        // Movies/toolbar observers. The v12.1 LibraryToolbar pending bullet is
+        // query-specific, observed, and therefore the readiness prerequisite.
+        return toolbarPending;
+    }
+
+    function getContext() {
+        const route = routeInfo();
+        const page = getPage();
+        if (!route.isMovies || !page) return null;
+        const settings = readViewSettings(route);
+        const picker = findPicker(page);
+        const toolbar = findLibraryToolbar();
+        const pageSize = readLibraryPageSize();
+        if (!settings || !picker || !toolbar || pageSize === null) return null;
+        const cards = cardsIn(page);
+        return {
+            route,
+            page,
+            settings,
+            picker,
+            toolbar,
+            pageSize,
+            cards,
+            empty: !!page.querySelector('.noItemsMessage.centerMessage'),
+            loading: hasLoadingMarker(toolbar),
+            alphabetClear: isAlphabetClear(settings, picker),
+            queryId: queryIdentity(route, settings, pageSize)
+        };
+    }
+
+    function isPotentiallySupported(context) {
         return !!context
             && (!CONFIG.moviesOnly || context.route.isMovies)
-            && (!CONFIG.respectSortOrder || hasSupportedSort(context.settings))
-            && context.settings.ViewMode === 'grid';
+            && hasPotentialUnpaginatedResult(context)
+            && hasInitialIndex(context.settings)
+            && context.settings.ViewMode === 'grid'
+            && (!CONFIG.respectSortOrder || hasSupportedSort(context.settings));
     }
 
-    // Only a rendered card grid or Jellyfin's source-shaped NoItemsMessage can arm a click.
-    // isCompatible intentionally remains true during an in-flight replacement so settle waits
-    // do not mistake Jellyfin's temporary Loading component for an unsupported layout.
-    function isSupported(context) {
-        return isCompatible(context) && (context.cards.length > 0 || context.emptyResult);
+    // Source-backed readiness: ItemsView renders Loading while itemsResult.isPending,
+    // then renders either Cards from that query result or NoItemsMessage. Empty DOM is
+    // deliberately not accepted as an empty result.
+    function isReady(context) {
+        return isPotentiallySupported(context)
+            && context.alphabetClear
+            && !context.loading
+            && (context.cards.length > 0 || context.empty);
     }
 
-    function ensureFeedback(context) {
-        if (state.feedback && state.feedback.isConnected) return state.feedback;
-        const host = context.picker.root;
-        const feedback = document.createElement('div');
-        feedback.className = 'alpha-jump-feedback';
-        feedback.setAttribute('role', 'status');
-        feedback.setAttribute('aria-live', 'polite');
-        feedback.style.cssText = 'position:fixed;right:3.5rem;bottom:1rem;z-index:1201;max-width:18rem;padding:.5rem .75rem;background:var(--theme-background,rgba(0,0,0,.85));color:inherit;border-radius:.25rem;font-size:.875rem;box-shadow:0 2px 8px rgba(0,0,0,.35);';
-        host.appendChild(feedback);
-        state.feedback = feedback;
-        return feedback;
-    }
-
-    function ensureStyles() {
-        if (state.style && state.style.isConnected) return;
-        const style = document.createElement('style');
-        style.id = 'alpha-jump-prototype-style';
-        style.textContent = [
-            '.alphaPicker-fixed-right button[data-alpha-jump-selected="true"] {',
-            '  outline: 2px solid currentColor;',
-            '  outline-offset: -2px;',
-            '  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .22);',
-            '  font-weight: 700;',
-            '}'
-        ].join('\n');
-        document.head.appendChild(style);
-        state.style = style;
-    }
-
-    function removeStyles() {
-        if (state.style) state.style.remove();
-        state.style = null;
-    }
-
-    function announce(context, message, cancelable) {
-        const feedback = ensureFeedback(context);
-        feedback.replaceChildren(document.createTextNode(message));
-        if (cancelable) {
-            const cancel = document.createElement('button');
-            cancel.type = 'button';
-            cancel.textContent = 'Cancel';
-            cancel.style.cssText = 'margin-left:.5rem;';
-            cancel.addEventListener('click', () => cancelRun('cancelled by user', true));
-            feedback.appendChild(cancel);
-        }
-    }
-
-    function clearFeedback() {
-        if (state.feedback) state.feedback.remove();
-        state.feedback = null;
-    }
-
-    function applySelection(context, value) {
-        ensureStyles();
-        state.selected = value;
-        state.selectedQueryId = value === null ? null : context.queryId;
-        context.picker.buttons.forEach(button => {
-            const selected = button.value === value;
-            button.classList.toggle('alpha-jump-selected', selected);
-            button.setAttribute('data-alpha-jump-selected', selected ? 'true' : 'false');
-            if (selected) button.setAttribute('aria-current', 'true');
-            else button.removeAttribute('aria-current');
-        });
-    }
-
-    function clearSelection(context) {
-        applySelection(context, null);
+    function firstMatch(cards, letter) {
+        return cards.find(card => (card.dataset.prefix || '').startsWith(letter)) || null;
     }
 
     function removeSelectionMarkers(picker) {
@@ -267,423 +268,442 @@
         });
     }
 
-    function runIsCurrent(run) {
-        return state.run === run && !state.destroyed && !run.cancelled;
+    function ensureStyles() {
+        if (state.style?.isConnected) return;
+        const style = doc.createElement('style');
+        style.id = 'alpha-jump-prototype-style';
+        style.textContent = [
+            '.alphaPicker-fixed-right button[data-alpha-jump-selected="true"] {',
+            '  outline: 2px solid currentColor;',
+            '  outline-offset: -2px;',
+            '  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .22);',
+            '  font-weight: 700;',
+            '}'
+        ].join('\n');
+        doc.head.appendChild(style);
+        state.style = style;
     }
 
-    function cancelRun(reason, announceCancellation) {
-        const run = state.run;
-        if (!run) return;
-        run.cancelled = true;
-        state.run = null;
-        state.nativeClear = null;
-        log('Cancelled:', reason);
-        if (announceCancellation) {
-            const context = getContext();
-            if (context) announce(context, 'Alpha jump cancelled.', false);
-        }
+    function clearSelection() {
+        removeSelectionMarkers(state.picker);
+        state.selected = null;
+        state.selectedQueryId = null;
     }
 
-    function remainingNavigation(run) {
-        return CONFIG.maxNavigationActions - run.navigationActions;
-    }
-
-    function assertBudget(run) {
-        if (!runIsCurrent(run)) throw new Error('cancelled');
-        if (performance.now() - run.startedAt > CONFIG.maxElapsedMs) throw new Error('time budget exhausted');
-        if (remainingNavigation(run) <= 0) throw new Error('navigation budget exhausted');
-    }
-
-    function settledFor(context, wantedStart, oldSignature) {
-        const isExpectedStart = wantedStart.test(context.startIndex);
-        if (!isCompatible(context) || !isExpectedStart) return false;
-        if (hasPendingMarker(context.pager)) return false;
-        if (wantedStart.nativeAlphabet !== undefined && context.nativeAlphabet !== wantedStart.nativeAlphabet) return false;
-        const previousShouldBeEnabled = wantedStart.previousEnabled(context.startIndex);
-        if (context.pager.previous.disabled === previousShouldBeEnabled) return false;
-        // An absent card set is settled only when Jellyfin rendered its NoItemsMessage, never
-        // merely because a loading or error transition has no cards.
-        if (!context.cards.length) return context.emptyResult;
-        // Old cards are not accepted for a page change. Native alphabet clear can legitimately
-        // retain the same IDs, but only after the separately verified Alphabet:null state.
-        if (!wantedStart.allowSameCards && context.cardSignature === oldSignature) return false;
-        return true;
-    }
-
-    function progressSnapshot(context) {
-        if (!context || !isCompatible(context)) return null;
-        return JSON.stringify({
-            startIndex: context.startIndex,
-            cards: context.cardSignature,
-            pending: hasPendingMarker(context.pager),
-            nativeAlphabet: context.nativeAlphabet,
-            emptyResult: context.emptyResult,
-            previousDisabled: context.pager.previous.disabled
+    function applySelection(context, value) {
+        ensureStyles();
+        state.selected = value;
+        state.selectedQueryId = value === null ? null : context.queryId;
+        context.picker.buttons.forEach(button => {
+            const selected = button.value === value;
+            button.classList.toggle('alpha-jump-selected', selected);
+            if (selected) button.setAttribute('data-alpha-jump-selected', 'true');
+            else button.removeAttribute('data-alpha-jump-selected');
+            // This is enhancement-owned state. Native aria-pressed remains untouched.
+            if (selected) button.setAttribute('aria-current', 'true');
+            else button.removeAttribute('aria-current');
         });
     }
 
-    function waitForSettled(run, wantedStart, oldSignature, label) {
-        return new Promise((resolve, reject) => {
-            let done = false;
-            let timeout = null;
-            let noProgressTimeout = null;
-            let lastProgressSnapshot = null;
-            const finish = (failure, context) => {
-                if (done) return;
-                done = true;
-                observer.disconnect();
-                if (timeout !== null) window.clearTimeout(timeout);
-                if (noProgressTimeout !== null) window.clearTimeout(noProgressTimeout);
-                failure ? reject(failure) : resolve(context);
-            };
-            const resetNoProgressTimeout = () => {
-                if (noProgressTimeout !== null) window.clearTimeout(noProgressTimeout);
-                noProgressTimeout = window.setTimeout(
-                    () => finish(new Error(`${label} made no relevant progress within ${CONFIG.maxNoProgressMs} ms`)),
-                    CONFIG.maxNoProgressMs
-                );
-            };
-            const inspect = () => {
-                if (!runIsCurrent(run)) return finish(new Error('cancelled'));
-                const context = getContext();
-                if (!isCompatible(context)) return finish(new Error('supported Movies state disappeared'));
-                if (context.queryId !== run.queryId) return finish(new Error('query changed'));
-                const currentProgressSnapshot = progressSnapshot(context);
-                if (currentProgressSnapshot !== lastProgressSnapshot) {
-                    lastProgressSnapshot = currentProgressSnapshot;
-                    resetNoProgressTimeout();
-                }
-                if (settledFor(context, wantedStart, oldSignature)) {
-                    // One frame ensures React has committed the matching page, without using polling.
-                    window.requestAnimationFrame(() => {
-                        const confirmed = getContext();
-                        if (runIsCurrent(run) && confirmed && settledFor(confirmed, wantedStart, oldSignature)) finish(null, confirmed);
-                    });
-                }
-            };
-            const observer = new MutationObserver(inspect);
-            observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-disabled', 'disabled', 'aria-pressed', 'data-prefix', 'data-id'] });
-            const remainingMs = CONFIG.maxElapsedMs - (performance.now() - run.startedAt);
-            const timeoutMs = Math.min(CONFIG.maxPageSettleMs, Math.max(0, remainingMs));
-            timeout = window.setTimeout(
-                () => finish(new Error(remainingMs <= 0 ? 'time budget exhausted' : `${label} did not settle within ${timeoutMs} ms`)),
-                timeoutMs
-            );
-            resetNoProgressTimeout();
-            inspect();
+    function ensureFeedback(context) {
+        if (state.feedback?.isConnected) return state.feedback;
+        const feedback = doc.createElement('div');
+        feedback.className = 'alpha-jump-feedback';
+        feedback.setAttribute('role', 'status');
+        feedback.setAttribute('aria-live', 'polite');
+        feedback.style.cssText = 'position:fixed;right:3.5rem;bottom:1rem;z-index:1201;max-width:18rem;padding:.5rem .75rem;background:var(--theme-background,rgba(0,0,0,.85));color:inherit;border-radius:.25rem;font-size:.875rem;box-shadow:0 2px 8px rgba(0,0,0,.35);';
+        context.picker.root.appendChild(feedback);
+        state.feedback = feedback;
+        return feedback;
+    }
+
+    function clearFeedback() {
+        state.feedback?.remove();
+        state.feedback = null;
+    }
+
+    function announce(context, message, cancelable) {
+        const feedback = ensureFeedback(context);
+        feedback.replaceChildren(doc.createTextNode(message));
+        if (cancelable) {
+            const cancel = doc.createElement('button');
+            cancel.type = 'button';
+            cancel.textContent = 'Cancel';
+            cancel.style.cssText = 'margin-left:.5rem;';
+            cancel.addEventListener('click', () => cancelRun('Cancelled.', true));
+            feedback.appendChild(cancel);
+        }
+    }
+
+    function scrollTop() {
+        root.scrollTo({
+            top: 0,
+            behavior: CONFIG.smoothScroll && !root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'
         });
     }
 
-    function activatePager(run, direction) {
-        const before = getContext();
-        if (!isSupported(before)) throw new Error('unsupported state before paging');
-        assertBudget(run);
-        const button = direction === 'previous' ? before.pager.previous : before.pager.next;
-        if (button.disabled) throw new Error(direction === 'next' ? 'end of list' : 'cannot return to page one');
-        run.navigationActions += 1;
-        run.expectedStart = before.startIndex;
-        button.click(); // Ordinary Jellyfin pager handler; no fetches or React state are invoked by this script.
-        return waitForSettled(
-            run,
-            {
-                test: direction === 'previous' ? index => index < before.startIndex : index => index > before.startIndex,
-                previousEnabled: index => index > 0,
-                allowSameCards: false
-            },
-            before.cardSignature,
-            `native ${direction} page`
-        )
-            .then(context => {
-                // Page size is user-configurable, so source only lets us assert directional movement.
-                if (direction === 'previous' && context.startIndex >= before.startIndex) throw new Error('Previous did not move backward');
-                if (direction === 'next' && context.startIndex <= before.startIndex) throw new Error('Next did not move forward');
-                return context;
-            });
-    }
-
-    async function clearNativeAlphabet(run, context) {
-        const active = context.nativeAlphabet;
-        if (!active) return context;
-        const activeButton = context.picker.buttons.find(button => button.value === active);
-        if (!activeButton) throw new Error('native alphabet state cannot be cleared safely');
-        assertBudget(run);
-        run.navigationActions += 1;
-        state.nativeClear = activeButton;
-        activeButton.click(); // Exactly one bypass through the ordinary exclusive ToggleButtonGroup action.
-        const cleared = await waitForSettled(
-            run,
-            {
-                test: index => index === 0,
-                previousEnabled: () => false,
-                nativeAlphabet: null,
-                allowSameCards: true
-            },
-            context.cardSignature,
-            'native alphabet clear'
-        );
-        state.nativeClear = null;
-        if (cleared.nativeAlphabet) throw new Error('native alphabet filter remained active');
-        return cleared;
-    }
-
-    async function returnToStart(run, context) {
-        let current = context;
-        while (current.startIndex > 0) {
-            current = await activatePager(run, 'previous');
-        }
-        return current;
-    }
-
-    function firstMatchingCard(context, letter) {
-        return context.cards.find(card => String(card.dataset.prefix || '').startsWith(letter)) || null;
+    function stickyOffset() {
+        return Array.from(doc.querySelectorAll('[role="banner"], .MuiAppBar-root'))
+            .filter(node => {
+                const style = root.getComputedStyle(node);
+                return (style.position === 'fixed' || style.position === 'sticky') && node.getBoundingClientRect().top <= 1;
+            })
+            .reduce((largest, node) => Math.max(largest, node.getBoundingClientRect().bottom), 0) + 12;
     }
 
     function scrollToCard(card) {
-        const header = document.querySelector('header, .MuiAppBar-root');
-        const headerHeight = header ? header.getBoundingClientRect().height : 0;
-        const y = window.scrollY + card.getBoundingClientRect().top - headerHeight - 8;
-        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        window.scrollTo({ top: Math.max(0, y), behavior: CONFIG.smoothScroll && !reduceMotion ? 'smooth' : 'auto' });
+        const destination = Math.max(0, root.scrollY + card.getBoundingClientRect().top - stickyOffset());
+        root.scrollTo({
+            top: destination,
+            behavior: CONFIG.smoothScroll && !root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'
+        });
     }
 
-    function scrollToTop() {
-        const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        window.scrollTo({ top: 0, behavior: CONFIG.smoothScroll && !reduceMotion ? 'smooth' : 'auto' });
-    }
-
-    function initialExpectation(context) {
-        return {
-            test: index => index === context.startIndex,
-            previousEnabled: index => index > 0,
-            nativeAlphabet: context.nativeAlphabet,
-            allowSameCards: true
-        };
-    }
-
-    async function restoreInitialPage(run) {
-        let current = getContext();
-        if (!isSupported(current) || current.queryId !== run.queryId) return false;
-        while (current.startIndex !== run.initialStartIndex) {
-            if (performance.now() - run.startedAt > CONFIG.maxElapsedMs || remainingNavigation(run) <= 0) return false;
-            current = await activatePager(run, current.startIndex > run.initialStartIndex ? 'previous' : 'next');
-        }
-        window.scrollTo({ top: run.initialScrollY, behavior: 'auto' });
-        return true;
-    }
-
-    async function execute(run, letter) {
-        let context = getContext();
-        if (!isCompatible(context) || context.queryId !== run.queryId) throw new Error('unsupported or changed initial state');
-        context = await waitForSettled(run, initialExpectation(context), context.cardSignature, 'initial Movies results');
-        context = await clearNativeAlphabet(run, context);
-        context = await returnToStart(run, context);
-        if (!runIsCurrent(run)) return;
-
-        if (letter === null || letter === '#') {
-            clearSelection(context);
-            if (letter === '#') applySelection(context, '#');
-            scrollToTop();
-            announce(context, letter === '#' ? 'At the beginning of the matching Movies list.' : 'Alpha jump cleared; at page one.', false);
-            return;
-        }
-
-        while (runIsCurrent(run)) {
-            const match = firstMatchingCard(context, letter);
-            if (match) {
-                applySelection(context, letter);
-                scrollToCard(match);
-                announce(context, `Jumped to ${letter}.`, false);
-                return;
-            }
-
-            // Next is end-of-list evidence only after waitForSettled has verified real cards/
-            // a settled empty view, the expected settings start index, and no pending marker.
-            if (context.pager.next.disabled) {
-                const restored = await restoreInitialPage(run);
-                const latest = getContext();
-                if (latest) {
-                    clearSelection(latest);
-                    announce(latest, restored ? `No matching ${letter} titles.` : `No matching ${letter} titles; restoration was incomplete.`, false);
-                }
-                return;
-            }
-            context = await activatePager(run, 'next');
-        }
-    }
-
-    function finishRun(run, caught) {
-        if (!runIsCurrent(run)) return;
-        state.run = null;
-        state.nativeClear = null;
-        const context = getContext();
-        if (!context) return;
-        if (caught && caught.message === 'cancelled') return;
-        if (caught && /budget exhausted/.test(caught.message)) {
-            clearSelection(context);
-            announce(context, 'Search incomplete: navigation budget exhausted.', false);
-            return;
-        }
-        error('Jump failed:', caught);
-        clearSelection(context);
-        announce(context, 'Alpha jump stopped; native controls remain available.', false);
-    }
-
-    function begin(letter) {
-        const context = getContext();
-        if (!isCompatible(context)) return;
-        const supersedingRun = !!state.run;
-        cancelRun('superseded');
-        const target = !supersedingRun && state.selected === letter && state.selectedQueryId === context.queryId ? null : letter;
-        clearSelection(context);
+    function beginRun(context, value) {
+        cancelRun(null, false);
         const run = {
+            id: ++state.sequence,
+            value,
             queryId: context.queryId,
-            startedAt: performance.now(),
-            initialStartIndex: context.startIndex,
-            initialScrollY: window.scrollY,
-            navigationActions: 0,
-            cancelled: false
+            routeHash: context.route.hash,
+            cancelled: false,
+            timeout: 0,
+            observer: null,
+            frame: 0,
+            finishWait: null
         };
+        run.timeout = root.setTimeout(() => {
+            if (state.run === run) cancelRun('Timed out waiting for Jellyfin results.', true);
+        }, CONFIG.maxElapsedMs);
         state.run = run;
-        announce(context, target ? `Finding ${target}…` : 'Returning to page one…', true);
-        execute(run, target)
-            .then(() => {
-                if (runIsCurrent(run)) {
-                    state.run = null;
-                    state.nativeClear = null;
+        return run;
+    }
+
+    function isCurrent(run) {
+        return !state.destroyed && state.run === run && !run.cancelled;
+    }
+
+    function finishRun(run) {
+        if (state.run !== run) return;
+        if (run.timeout) root.clearTimeout(run.timeout);
+        if (run.frame) root.cancelAnimationFrame(run.frame);
+        run.observer?.disconnect();
+        run.timeout = 0;
+        run.frame = 0;
+        run.observer = null;
+        run.finishWait = null;
+        state.run = null;
+    }
+
+    function cancelRun(message, showFeedback) {
+        const run = state.run;
+        if (!run) {
+            if (showFeedback) {
+                const context = getContext();
+                if (context) announce(context, message || 'Cancelled.', false);
+            }
+            return;
+        }
+        run.cancelled = true;
+        run.finishWait?.({ cancelled: true });
+        finishRun(run);
+        if (showFeedback) {
+            const context = getContext();
+            if (context) announce(context, message || 'Cancelled.', false);
+            else clearFeedback();
+        } else {
+            clearFeedback();
+        }
+        log('cancelled', message || 'superseded');
+    }
+
+    function relevantPageMutation(records) {
+        return records.some(record => {
+            const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+            if (target?.closest('.alpha-jump-feedback')) return false;
+            if (record.type === 'attributes') {
+                return record.target.matches?.('.MuiChip-label, .alphaPicker-fixed-right button');
+            }
+            if (target?.matches?.('.MuiChip-label')) return true;
+            return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(node => {
+                if (node.nodeType !== 1) return false;
+                return node.matches?.('.card[data-prefix], .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label')
+                    || !!node.querySelector?.('.card[data-prefix], .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label');
+            });
+        });
+    }
+
+    function waitForReady(run) {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            let timeout = 0;
+            const finish = (result, failure) => {
+                if (settled) return;
+                settled = true;
+                if (timeout) root.clearTimeout(timeout);
+                if (run.frame) root.cancelAnimationFrame(run.frame);
+                run.observer?.disconnect();
+                run.frame = 0;
+                run.observer = null;
+                run.finishWait = null;
+                failure ? reject(failure) : resolve(result);
+            };
+            const examine = () => {
+                run.frame = 0;
+                if (!isCurrent(run)) return finish(null, new Error('cancelled'));
+                const context = getContext();
+                if (!context || !isPotentiallySupported(context)) return finish(null, new Error('unsupported'));
+                if (context.route.hash !== run.routeHash || context.queryId !== run.queryId) {
+                    return finish(null, new Error('query changed'));
                 }
-            })
-            .catch(caught => finishRun(run, caught));
+                if (isReady(context)) return finish(context);
+            };
+            const schedule = () => {
+                if (!isCurrent(run) || run.frame) return;
+                run.frame = root.requestAnimationFrame(examine);
+            };
+            const initial = getContext();
+            if (!initial || !isPotentiallySupported(initial)) {
+                reject(new Error('unsupported'));
+                return;
+            }
+            run.observer = new root.MutationObserver(records => {
+                if (relevantPageMutation(records)) schedule();
+            });
+            const observeOptions = { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'aria-pressed'] };
+            run.observer.observe(initial.page, observeOptions);
+            run.observer.observe(initial.toolbar, observeOptions);
+            run.finishWait = () => finish(null, new Error('cancelled'));
+            timeout = root.setTimeout(() => finish(null, new Error('readiness timeout')), CONFIG.maxReadyWaitMs);
+            schedule();
+        });
+    }
+
+    async function clearNativeAlphabet(run, context) {
+        if (context.alphabetClear) return context;
+        const value = nativeAlphabet(context.picker);
+        const button = value && context.picker.buttons.find(candidate => candidate.value === value);
+        if (!button) throw new Error('native alphabet state is ambiguous');
+        state.nativeBypassButton = button;
+        button.click(); // Ordinary Jellyfin ToggleButton activation; the capture listener allows this one click.
+        return waitForReady(run);
+    }
+
+    async function execute(context, value) {
+        const run = beginRun(context, value);
+        announce(context, value === '#' ? 'Returning to the beginning…' : `Finding ${value}…`, true);
+        try {
+            let readyContext = context;
+            if (!readyContext.alphabetClear) readyContext = await clearNativeAlphabet(run, readyContext);
+            else readyContext = await waitForReady(run);
+            if (!isCurrent(run)) return;
+            if (value === '#') {
+                clearSelection();
+                scrollTop();
+                announce(readyContext, 'At the beginning.', false);
+                finishRun(run);
+                return;
+            }
+            const card = firstMatch(readyContext.cards, value);
+            if (card) {
+                applySelection(readyContext, value);
+                scrollToCard(card);
+                announce(readyContext, `First ${value} title.`, false);
+            } else {
+                clearSelection();
+                announce(readyContext, `No matching ${value} titles.`, false);
+            }
+            finishRun(run);
+        } catch (caught) {
+            if (!isCurrent(run)) return;
+            const current = getContext();
+            finishRun(run);
+            if (current && /query changed/.test(String(caught?.message))) {
+                clearSelection();
+                announce(current, 'Cancelled: library query changed.', false);
+            } else if (current && /unsupported/.test(String(caught?.message))) {
+                clearSelection();
+                announce(current, 'Alpha Jump is unavailable for this view.', false);
+            } else if (current && /timeout/.test(String(caught?.message))) {
+                announce(current, 'Search incomplete: Jellyfin results did not settle.', false);
+            } else {
+                reportError('Could not prepare Movies results.', caught);
+                if (current) announce(current, 'Alpha Jump could not prepare these results.', false);
+            }
+        }
     }
 
     function onPickerClick(event) {
-        const button = event.target.closest('button[type="button"][value]');
-        if (!button || !state.picker || !state.picker.group.contains(button) || !LETTERS.has(button.value)) return;
-        if (state.nativeClear === button && !event.isTrusted) {
-            // Narrow bypass for our own single native deselect click only.
+        const button = event.target.closest?.('button[type="button"][value]');
+        if (!button || !state.picker?.group.contains(button) || !LETTERS.has(button.value)) return;
+        if (button === state.nativeBypassButton) {
+            state.nativeBypassButton = null;
             return;
         }
         const context = getContext();
-        // While an enhancement-owned page replacement is loading, keep ownership of the
-        // verified compatible picker: the newer letter supersedes the old run instead of
-        // falling through to Jellyfin's native alphabet filter.
-        if (!isCompatible(context) || (!isSupported(context) && !state.run)) return;
+        // Potential support intentionally includes transient no-card loading states so
+        // a superseding click cannot fall through to Jellyfin's native alphabet filter.
+        if (!isPotentiallySupported(context)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        begin(button.value);
+        const value = button.value;
+        if ((value === '#' || (state.selected === value && state.selectedQueryId === context.queryId))
+            && context.alphabetClear && !state.run) {
+            clearSelection();
+            scrollTop();
+            announce(context, 'At the beginning.', false);
+            return;
+        }
+        void execute(context, value);
     }
 
-    function onPagerClick(event) {
-        if (!event.isTrusted || !state.run) return;
-        const button = event.currentTarget;
-        if (button === state.pager?.previous || button === state.pager?.next) {
-            cancelRun('user paging change', true);
+    function attachSurface(context) {
+        if (state.picker?.root !== context.picker.root) {
+            detachSurface(false);
+            state.picker = context.picker;
+            state.pickerClick = onPickerClick;
+            context.picker.root.addEventListener('click', state.pickerClick, true);
+        }
+        if (state.page !== context.page) {
+            if (state.page && state.pageClick) state.page.removeEventListener('click', state.pageClick);
+            state.pageObserver?.disconnect();
+            state.page = context.page;
+            // Native toolbar/filter/sort/pager interactions can change persisted
+            // settings without changing a card node (for example, a cached result
+            // with the same cards). Re-read identity after React's click handling.
+            state.pageClick = event => {
+                if (!event.target.closest?.('.alphaPicker-fixed-right')) scheduleLifecycle();
+            };
+            state.page.addEventListener('click', state.pageClick);
+            state.pageObserver = new root.MutationObserver(records => {
+                if (relevantPageMutation(records)) scheduleLifecycle();
+            });
+            const observeOptions = { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'aria-pressed'] };
+            state.pageObserver.observe(context.page, observeOptions);
+            state.pageObserver.observe(context.toolbar, observeOptions);
         }
     }
 
-    function onKeyDown(event) {
-        if (event.key === 'Escape' && state.run) {
-            event.preventDefault();
-            cancelRun('cancelled by Escape', true);
+    function detachSurface(removeFeedback) {
+        if (state.picker?.root && state.pickerClick) {
+            state.picker.root.removeEventListener('click', state.pickerClick, true);
         }
-    }
-
-    // Bubble phase deliberately runs after React's normal click handling. This is observation
-    // only: it catches same-document local-storage setting changes even when the visible cards
-    // happen not to change, and it never prevents or rewrites a native event.
-    function onUserClick() {
-        window.requestAnimationFrame(bindSurface);
-    }
-
-    function detachSurface() {
         removeSelectionMarkers(state.picker);
-        if (state.picker && state.pickerClick) state.picker.group.removeEventListener('click', state.pickerClick, true);
-        if (state.pager && state.pagerClick) {
-            state.pager.previous.removeEventListener('click', state.pagerClick, true);
-            state.pager.next.removeEventListener('click', state.pagerClick, true);
-        }
         state.picker = null;
-        state.pager = null;
-        clearFeedback();
+        state.pickerClick = null;
+        if (state.page && state.pageClick) state.page.removeEventListener('click', state.pageClick);
+        state.pageClick = null;
+        state.pageObserver?.disconnect();
+        state.pageObserver = null;
+        state.page = null;
+        state.nativeBypassButton = null;
+        if (removeFeedback) clearFeedback();
     }
 
-    function bindSurface() {
+    function refreshSurface() {
         if (state.destroyed) return;
         const context = getContext();
-        const compatible = isCompatible(context);
-        const supported = isSupported(context);
-        const changed = !context || state.picker?.group !== context.picker.group || state.pager?.next !== context.pager.next;
-        if (!compatible) {
-            if (state.run) cancelRun('route, sort, filter, or view changed');
-            state.selected = null;
-            state.selectedQueryId = null;
-            state.boundQueryId = null;
-            detachSurface();
+        if (state.run && (!context || context.route.hash !== state.run.routeHash || context.queryId !== state.run.queryId)) {
+            cancelRun('Cancelled: library query changed.', true);
+        }
+        if (state.selected && (!context || state.selectedQueryId !== context.queryId)) clearSelection();
+        if (!isPotentiallySupported(context)) {
+            detachSurface(true);
             return;
         }
-        if (state.boundQueryId && context.queryId !== state.boundQueryId) {
-            if (state.run) cancelRun('query changed', true);
-            state.selected = null;
-            state.selectedQueryId = null;
-            clearSelection(context);
-        }
-        state.boundQueryId = context.queryId;
-        // Retain native listeners while an enhancement-owned page replacement is loading;
-        // otherwise detach until a rendered card grid or genuine NoItemsMessage returns.
-        if (!supported) {
-            if (!state.run) detachSurface();
-            return;
-        }
-        if (!changed) {
-            return;
-        }
-        detachSurface();
-        state.picker = context.picker;
-        state.pager = context.pager;
-        state.pickerClick = onPickerClick;
-        state.pagerClick = onPagerClick;
-        state.picker.group.addEventListener('click', state.pickerClick, true);
-        state.pager.previous.addEventListener('click', state.pagerClick, true);
-        state.pager.next.addEventListener('click', state.pagerClick, true);
-        applySelection(context, state.selected);
-        log('Armed for', context.route.parentId);
+        attachSurface(context);
     }
 
-    function initialize() {
-        if (!CONFIG.enabled) return;
+    function scheduleLifecycle() {
+        if (state.destroyed || state.lifecycleFrame) return;
+        state.lifecycleFrame = root.requestAnimationFrame(() => {
+            state.lifecycleFrame = 0;
+            refreshSurface();
+        });
+    }
+
+    function pageWasAddedOrRemoved(records) {
+        return records.some(record => {
+            // The page itself remains mounted when a user changes a view setting
+            // such as page size. Its result subtree is replaced in place, so a
+            // newly supported state must be reconsidered even when #moviesPage
+            // was not added or removed.
+            const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
+            if (target?.closest?.('#moviesPage')) return true;
+            return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(node => {
+                if (node.nodeType !== 1) return false;
+                return node.id === 'moviesPage' || !!node.querySelector?.('#moviesPage');
+            });
+        });
+    }
+
+    function init() {
+        if (!CONFIG.enabled || !doc || state.destroyed) return;
+        if (root[INSTANCE_KEY]?.destroy) root[INSTANCE_KEY].destroy('re-injected');
         state.hashChange = () => {
-            cancelRun('navigation');
-            state.selected = null;
-            state.selectedQueryId = null;
-            detachSurface();
-            bindSurface();
+            cancelRun('Cancelled: navigation changed.', false);
+            scheduleLifecycle();
         };
         state.popState = state.hashChange;
-        state.keyDown = onKeyDown;
-        state.userClick = onUserClick;
-        window.addEventListener('hashchange', state.hashChange);
-        window.addEventListener('popstate', state.popState);
-        document.addEventListener('keydown', state.keyDown, true);
-        document.addEventListener('click', state.userClick, false);
-        state.observer = new MutationObserver(bindSurface);
-        state.observer.observe(document.documentElement, { childList: true, subtree: true });
-        bindSurface();
+        state.keyDown = event => {
+            if (event.key === 'Escape' && state.run) {
+                event.preventDefault();
+                cancelRun('Cancelled.', true);
+            }
+        };
+        root.addEventListener('hashchange', state.hashChange);
+        root.addEventListener('popstate', state.popState);
+        doc.addEventListener('keydown', state.keyDown, true);
+        // This observer only finds insertion/removal of the active Movies page;
+        // card discovery and result observation remain scoped to #moviesPage.
+        state.mountObserver = new root.MutationObserver(records => {
+            if (pageWasAddedOrRemoved(records)) scheduleLifecycle();
+        });
+        state.mountObserver.observe(doc.body, { childList: true, subtree: true });
+        refreshSurface();
+        root[INSTANCE_KEY] = api;
+        log('initialized');
     }
 
-    function destroy(reason) {
+    function destroy(reason = 'destroyed') {
         if (state.destroyed) return;
         state.destroyed = true;
-        cancelRun(reason || 'disabled');
-        detachSurface();
-        if (state.observer) state.observer.disconnect();
-        if (state.hashChange) window.removeEventListener('hashchange', state.hashChange);
-        if (state.popState) window.removeEventListener('popstate', state.popState);
-        if (state.keyDown) document.removeEventListener('keydown', state.keyDown, true);
-        if (state.userClick) document.removeEventListener('click', state.userClick, false);
-        removeStyles();
-        delete window[INSTANCE_KEY];
-        log('Destroyed:', reason || 'disabled');
+        if (state.lifecycleFrame) root.cancelAnimationFrame(state.lifecycleFrame);
+        cancelRun(null, false);
+        detachSurface(true);
+        state.mountObserver?.disconnect();
+        state.mountObserver = null;
+        root.removeEventListener('hashchange', state.hashChange);
+        root.removeEventListener('popstate', state.popState);
+        doc.removeEventListener('keydown', state.keyDown, true);
+        state.style?.remove();
+        state.style = null;
+        if (root[INSTANCE_KEY] === api) delete root[INSTANCE_KEY];
+        log(reason);
     }
 
-    window[INSTANCE_KEY] = { destroy, config: CONFIG };
-    initialize();
-}());
+    const api = { config: CONFIG, destroy, refresh: scheduleLifecycle };
+    // Node's focused regression tests receive only deterministic helpers. The
+    // injected browser instance does not expose these test hooks.
+    const test = {
+        canonical,
+        renderedResultCount,
+        hasCompleteUnpaginatedResult,
+        hasPotentialUnpaginatedResult,
+        hasInitialIndex,
+        hasSupportedSort,
+        isPotentialSnapshot: snapshot => snapshot.completeUnpaginatedResult === true
+            && hasInitialIndex(snapshot.settings)
+            && snapshot.settings.ViewMode === 'grid'
+            && hasSupportedSort(snapshot.settings),
+        queryIdentity,
+        removeSelectionMarkers,
+        getContext,
+        attachSurface,
+        detachSurface,
+        execute,
+        waitForReady,
+        getState: () => state
+    };
+    return { init, api, test };
+}));

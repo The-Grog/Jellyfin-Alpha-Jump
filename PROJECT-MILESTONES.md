@@ -1,6 +1,6 @@
 # Jellyfin Alpha Jump — milestone tracker and prompts
 
-Status: local Milestone 2 prototype created for review. Browser validation is still gated on the open runtime evidence in `docs/feasibility.md` and `docs/testing.md`.
+Status: revised local Milestone 2 prototype created for review. Browser validation remains gated on the runtime evidence in `docs/feasibility.md` and `docs/testing.md`.
 
 Goal: change the Movies alphabet picker from filtering by letter to jumping within the items matching the current non-alphabet filters, while preserving Jellyfin's existing appearance and renderer.
 
@@ -12,10 +12,16 @@ Run one milestone at a time. Completion of a prompt does not authorize the next 
 
 | Milestone | Status | Evidence / decisions |
 | --- | --- | --- |
-| 1. Source inspection and feasibility | Source evidence recorded; runtime gates remain | R1’s limited pagination scope was explicitly accepted on 2026-09-20. R2/R5/R6 are implemented in the local prototype; R3/R4 contracts are source-backed but require browser proof. No continuous-library claim. |
-| 2. Minimal working proof of concept | Local prototype ready for review; not browser-validated | `src/alpha-jump.js`, `README.md`, `docs/architecture.md`, and `docs/testing.md` created. It uses public route/local-storage/DOM state and ordinary native controls only; no installation, restart, or publication occurred. |
-| 3. Browser validation and hardening | Not started | |
+| 1. Source inspection and feasibility | Revised source evidence recorded; runtime gates remain | The user accepted the page-size-zero native unpaginated experiment on 2026-09-20. R1 is scope-accepted; R2-R6 are updated in `docs/feasibility.md`. No performance or served-browser claim. |
+| 2. Minimal working proof of concept | Corrected locally; fresh served click pending | The old storage-key gate could not arm in the served saved-zero state. The revised prototype instead requires explicit `StartIndex: 0`, grid/ascending SortName, and a toolbar/card-count proof that the complete large result is rendered. Native pager scanning/restoration remains removed. |
+| 3. Browser validation and hardening | Started; one implementation defect found | Authorized Jellyfin 12.1 testing observed 1,538 toolbar results and 1,538 Movie cards with no pager, but the old Injector copy saw no `libraryPageSize` key and let A use native filtering. The local correction passes focused tests; its fresh served click, request inspection, performance, and coexistence tests remain open. |
 | 4. Reviewable first distribution | Not started | |
+
+## 2026-09-20 revised prototype decision
+
+The prior Previous/Next page scan is preserved as historical evidence only. The accepted local experiment instead requires the user to set **Library page size = 0** manually, allows Jellyfin Web to load/render the full currently constrained Movies result, then scrolls to the first matching rendered `data-prefix`. This neither changes server/user preferences nor adds fetching, virtualization, React hooks, API interception, packaging, or deployment.
+
+The resulting local implementation must fail closed when page size is not zero, persisted Movies `StartIndex` is not explicitly zero, results are not demonstrably ready, or the supported Movies grid/sort/picker shape is unavailable. Readiness, native-clear timing, request parameters, browser performance, and Enhanced coexistence remain Milestone 3 browser tests.
 
 Suggested model use: Terra High for milestones 1–3; Terra Medium for routine documentation and packaging. Request a Sol or Astra review if the design remains ambiguous or repeated attempts do not explain a failure. These are starting recommendations, not guarantees of model performance or usage savings. Do not delegate automatically.
 
@@ -196,6 +202,10 @@ Current decision: a local, reviewable Milestone 2 prototype is authorized under 
 Add dated entries as work proceeds. For each decision, record the evidence, chosen behavior, and any unresolved limitation.
 
 - 2026-09-20 — Milestone 2 local prototype: user accepted the narrower visible-pagination experiment (R1) but not a continuously scrollable experience. Implemented bounded page-one scan, starts-with prefix matching, native-clear bypass, cancellation, local selection, and best-effort same-query restoration in `src/alpha-jump.js`. Pre-browser review corrections added the required grid-view guard, explicit Previous-state and genuine-empty-result settle guards, initial settling, same-card native-clear evidence, top scrolling, idle query-identity selection reset, compatible-loading latest-request interception, snapshot-based no-progress detection, visible/accessibly exposed enhancement-only selection, marker cleanup on detach/destroy, and Cancel feedback cleanup. Source inspection supports public local-storage settings (`Movies - <parentId>`), MUI picker/pager structure, pending bullet, and card prefixes. An authorized test browser was unavailable, so no pointer/keyboard, settle, query-change, or actual page-transition behavior is claimed as passed; see `docs/testing.md`. No live system changed.
+
+- 2026-09-20 — Milestone 2 revised local prototype: after inspecting v12.1 `libraryPageSize`, its documented zero-pagination mode, `getLimitQuery()`, and retained `StartIndex`, the user accepted a page-size-zero native unpaginated experiment. Replaced the page scanner with a fail-closed, rendered-card scroll approach. The script requires public `libraryPageSize = 0`, `movies - <parentId>` settings with explicit `StartIndex: 0`, modern grid/ascending SortName, a source-shaped picker, and source-shaped ready results. It contains no pager discovery/activation, restoration, action budget, independent request, or React access. Node syntax, six focused deterministic tests, and `git diff --check` passed; browser execution/performance remains untested. No server preference was changed and no injector install, commit, push, or publication occurred.
+
+- 2026-09-21 — Milestone 3 controlled-browser follow-up: the user saved the UI page size to zero. Served Movies then showed toolbar total 1,538, no pager, and exactly 1,538 Movie-card wrappers, while the existing injected probe still saw no `libraryPageSize` storage key. The old Injector copy consequently failed to arm and A applied native filtering (73 results). Corrected local support logic to require the observed complete large rendered result rather than that missing key; Node syntax and all six focused production-path tests passed. JavaScript Injector Import rejected a standalone JS file because it expects exported JSON, so no automatic overwrite was made. A fresh corrected served click remains required; no request, performance, commit, push, or publication claim is made.
 
 - Planning: investigation precedes implementation; no live deployment is authorized by these prompts.
 - 2026-09-18 — Milestone 1: Read-only local runtime inspection confirmed Jellyfin Server 12.1.0 and the modern Movies route. Native alphabet filtering changes the result set; clicking the active toggle clears it. Movies replaces explicit 100-item pages (`1-100` to `101-200`) through native Previous/Next controls, so late-letter scanning would visibly move pages. Inner Movie title links contain `data-id`, `data-serverid`, and `data-type="Movie"`; displayed text alone cannot safely reproduce native grouping. Jellyfin Enhanced 12.7.0.0 and JavaScript Injector are active. External upstream checkout was stopped, so source-level event/query/prefix semantics were initially unverified. Decision: conditional no-go pending source inspection; see `docs/feasibility.md`.
