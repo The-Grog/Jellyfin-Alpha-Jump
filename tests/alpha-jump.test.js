@@ -174,7 +174,13 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
     };
     const clearNative = () => {
         settings.Alphabet = null;
-        buttons.find(button => button.value === alphabet)?.setAttribute('aria-pressed', 'false');
+        buttons.forEach(button => button.setAttribute('aria-pressed', 'false'));
+        persist();
+        notify(chip);
+    };
+    const activateNative = value => {
+        settings.Alphabet = value;
+        buttons.forEach(button => button.setAttribute('aria-pressed', button.value === value ? 'true' : 'false'));
         persist();
         notify(chip);
     };
@@ -191,11 +197,11 @@ function createHarness({ alphabet = null, loading = false, prefixes = ['AL', 'ZM
         button.click = () => {
             const event = { target: button, preventDefault() {}, stopImmediatePropagation() {} };
             pickerRoot.listeners.get('click')?.(event);
-            if (button.value === alphabet) clearNative();
+            if (button.value === settings.Alphabet) clearNative();
         };
     });
     const instance = createAlphaJump(root);
-    return { ...instance, settings, buttons, page, pickerRoot, chip, scrollCalls, setLoading, persist, notify, clickPicker };
+    return { ...instance, settings, buttons, page, pickerRoot, chip, scrollCalls, setLoading, persist, notify, clickPicker, activateNative };
 }
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -212,8 +218,10 @@ test('production context requires complete rendered results and explicit StartIn
 });
 
 test('# goes through the production native-clear and readiness path before scrolling top', async () => {
-    const harness = createHarness({ alphabet: 'M', prefixes: ['MM', 'MN'] });
-    harness.test.attachSurface(harness.test.getContext());
+    const harness = createHarness({ prefixes: ['MM', 'MN'] });
+    harness.test.refreshSurface();
+    harness.activateNative('M');
+    await turn();
     const event = harness.clickPicker('#');
     await turn();
     assert.equal(event.prevented, true);
@@ -221,6 +229,18 @@ test('# goes through the production native-clear and readiness path before scrol
     assert.equal(harness.buttons.find(button => button.value === 'M').getAttribute('aria-pressed'), 'false');
     assert.equal(harness.scrollCalls.at(-1).top, 0);
     assert.equal(harness.test.getState().run, null);
+});
+
+test('a native alphabet subset is eligible only after this query was proven fully unpaginated', () => {
+    const unproven = createHarness({ alphabet: 'M', renderedCount: 2 });
+    assert.equal(unproven.test.hasPotentialUnpaginatedResult(unproven.test.getContext()), false);
+
+    const proven = createHarness({ renderedCount: 101 });
+    proven.test.refreshSurface();
+    proven.page.childrenBySelector.set('.card[data-prefix][data-type="Movie"]', proven.test.getContext().cards.slice(0, 2));
+    proven.chip.textContent = '2';
+    proven.activateNative('M');
+    assert.equal(proven.test.hasPotentialUnpaginatedResult(proven.test.getContext()), true);
 });
 
 test('production waiter remains pending for the toolbar bullet and resolves from its observed removal', async () => {

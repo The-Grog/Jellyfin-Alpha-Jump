@@ -54,7 +54,9 @@
         style: null,
         hashChange: null,
         popState: null,
-        keyDown: null
+        keyDown: null,
+        confirmedUnpaginatedQueryId: null,
+        confirmedUnpaginatedTotal: null
     };
 
     function log(...args) {
@@ -160,6 +162,21 @@
         return Number.parseInt(labels[0].replaceAll(',', ''), 10);
     }
 
+    function renderedCardsMatchToolbarTotal(context) {
+        const total = renderedResultCount(context.toolbar);
+        return Number.isInteger(total) && context.cards.length === total;
+    }
+
+    function hasConfirmedNativeAlphabetSubset(context) {
+        // A <=100 result is ambiguous by itself: it could be an ordinary
+        // paged response with no pager. It is safe only when this exact query
+        // was already observed as a large, fully rendered, alphabet-clear
+        // result in this page session. queryIdentity deliberately omits
+        // Alphabet but retains every other persisted filter/sort setting.
+        return state.confirmedUnpaginatedQueryId === context.queryId
+            && renderedCardsMatchToolbarTotal(context);
+    }
+
     function hasCompleteUnpaginatedResult(context) {
         // A missing localStorage key was observed in the served v12.1 client
         // despite the page-size-zero UI setting being active. Do not guess from
@@ -167,18 +184,19 @@
         // Instead require a large result whose toolbar total equals the number
         // of renderer-owned Movie cards currently in the DOM.
         const total = renderedResultCount(context.toolbar);
-        return Number.isInteger(total)
-            && total > 100
-            && context.cards.length === total;
+        return context.alphabetClear
+            ? Number.isInteger(total) && total > 100 && context.cards.length === total
+            : hasConfirmedNativeAlphabetSubset(context);
     }
 
     function hasPotentialUnpaginatedResult(context) {
         // While the query-specific toolbar bullet is present, its count chip is
         // intentionally replaced. Keep an already full rendered result eligible
         // only long enough for waitForReady() to observe the new settled count.
-        return context.loading
-            ? context.cards.length > 100
-            : hasCompleteUnpaginatedResult(context);
+        return state.confirmedUnpaginatedQueryId === context.queryId
+            || (context.loading
+                ? context.cards.length > 100
+                : hasCompleteUnpaginatedResult(context));
     }
 
     function hasInitialIndex(settings) {
@@ -370,7 +388,8 @@
             timeout: 0,
             observer: null,
             frame: 0,
-            finishWait: null
+            finishWait: null,
+            awaitingNativeClear: false
         };
         run.timeout = root.setTimeout(() => {
             if (state.run === run) cancelRun('Timed out waiting for Jellyfin results.', true);
@@ -456,6 +475,12 @@
                 if (context.route.hash !== run.routeHash || context.queryId !== run.queryId) {
                     return finish(null, new Error('query changed'));
                 }
+                if (run.awaitingNativeClear) {
+                    const total = renderedResultCount(context.toolbar);
+                    if (!context.alphabetClear
+                        || !hasCompleteUnpaginatedResult(context)
+                        || total !== state.confirmedUnpaginatedTotal) return;
+                }
                 if (isReady(context)) return finish(context);
             };
             const schedule = () => {
@@ -484,6 +509,7 @@
         const value = nativeAlphabet(context.picker);
         const button = value && context.picker.buttons.find(candidate => candidate.value === value);
         if (!button) throw new Error('native alphabet state is ambiguous');
+        run.awaitingNativeClear = true;
         state.nativeBypassButton = button;
         button.click(); // Ordinary Jellyfin ToggleButton activation; the capture listener allows this one click.
         return waitForReady(run);
@@ -603,6 +629,11 @@
     function refreshSurface() {
         if (state.destroyed) return;
         const context = getContext();
+        if (context && context.alphabetClear && renderedCardsMatchToolbarTotal(context)
+            && renderedResultCount(context.toolbar) > 100) {
+            state.confirmedUnpaginatedQueryId = context.queryId;
+            state.confirmedUnpaginatedTotal = renderedResultCount(context.toolbar);
+        }
         if (state.run && (!context || context.route.hash !== state.run.routeHash || context.queryId !== state.run.queryId)) {
             cancelRun('Cancelled: library query changed.', true);
         }
@@ -701,6 +732,7 @@
         getContext,
         attachSurface,
         detachSurface,
+        refreshSurface,
         execute,
         waitForReady,
         getState: () => state
