@@ -1,5 +1,5 @@
-using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.AlphaJump.Configuration;
 
@@ -11,12 +11,16 @@ namespace Jellyfin.Plugin.AlphaJump.Configuration;
 public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationService
 {
     private readonly ILibraryManager _libraryManager;
+    private readonly ILogger<AlphaJumpConfigurationService> _logger;
     private readonly object _sync = new();
 
     /// <summary>Initializes a new instance of the configuration service.</summary>
-    public AlphaJumpConfigurationService(ILibraryManager libraryManager)
+    public AlphaJumpConfigurationService(
+        ILibraryManager libraryManager,
+        ILogger<AlphaJumpConfigurationService> logger)
     {
-        _libraryManager = libraryManager;
+        _libraryManager = libraryManager ?? throw new ArgumentNullException(nameof(libraryManager));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
@@ -94,11 +98,8 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
 
     private IReadOnlyList<LibraryDescriptor> DiscoverAndSynchronize(PluginConfiguration configuration)
     {
-        var libraries = _libraryManager.RootFolder.VirtualChildren
-            .OfType<CollectionFolder>()
-            .Select(folder => new LibraryDescriptor(folder.Id, folder.Name, folder.CollectionType?.ToString() ?? string.Empty))
-            .OrderBy(folder => folder.Name, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var libraries = LibraryDiscovery.Discover(_libraryManager, itemId =>
+            _logger.LogWarning("Skipping Alpha Jump library with invalid virtual-folder ItemId: {ItemId}", itemId));
         if (LibraryDiscoverySynchronizer.Synchronize(configuration, libraries))
         {
             Plugin.Instance!.UpdateConfiguration(configuration);

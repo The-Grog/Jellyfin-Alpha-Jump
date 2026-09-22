@@ -1,5 +1,8 @@
+using System.Reflection;
 using System.Xml.Serialization;
 using Jellyfin.Plugin.AlphaJump.Configuration;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Entities;
 using Xunit;
 
 namespace Jellyfin.Plugin.AlphaJump.Tests;
@@ -86,6 +89,31 @@ public class LibrarySelectionTests
         Assert.NotEqual(routeId, other);
     }
 
+    [Fact]
+    public void DiscoveryUsesVirtualFoldersAndSkipsInvalidFolderIds()
+    {
+        var movieId = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
+        var libraryManager = DispatchProxy.Create<ILibraryManager, VirtualFolderLibraryManager>();
+        var proxy = Assert.IsAssignableFrom<VirtualFolderLibraryManager>(libraryManager);
+        proxy.VirtualFolders =
+        [
+            new VirtualFolderInfo { ItemId = movieId.ToString("D"), Name = "Movies", CollectionType = CollectionTypeOptions.movies },
+            new VirtualFolderInfo { ItemId = "not-a-guid", Name = "Broken", CollectionType = CollectionTypeOptions.movies },
+            new VirtualFolderInfo { ItemId = null, Name = "Missing", CollectionType = CollectionTypeOptions.tvshows }
+        ];
+        var skipped = new List<string>();
+
+        var libraries = LibraryDiscovery.Discover(libraryManager, skipped.Add);
+
+        var library = Assert.Single(libraries);
+        Assert.Equal(movieId, library.Id);
+        Assert.Equal("Movies", library.Name);
+        Assert.Equal("movies", library.CollectionType);
+        Assert.Equal(1, proxy.GetVirtualFoldersCalls);
+        Assert.Equal(0, proxy.RootFolderAccesses);
+        Assert.Equal(["not-a-guid", "<null>"], skipped);
+    }
+
     private static PluginConfiguration RoundTrip(PluginConfiguration configuration)
     {
         var serializer = new XmlSerializer(typeof(PluginConfiguration));
@@ -93,5 +121,31 @@ public class LibrarySelectionTests
         serializer.Serialize(writer, configuration);
         using var reader = new StringReader(writer.ToString());
         return Assert.IsType<PluginConfiguration>(serializer.Deserialize(reader));
+    }
+
+    private class VirtualFolderLibraryManager : DispatchProxy
+    {
+        public List<VirtualFolderInfo> VirtualFolders { get; set; } = [];
+
+        public int GetVirtualFoldersCalls { get; private set; }
+
+        public int RootFolderAccesses { get; private set; }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod?.Name == nameof(ILibraryManager.GetVirtualFolders))
+            {
+                GetVirtualFoldersCalls++;
+                return VirtualFolders;
+            }
+
+            if (targetMethod?.Name == "get_RootFolder")
+            {
+                RootFolderAccesses++;
+                throw new InvalidOperationException("Discovery must not read RootFolder.VirtualChildren.");
+            }
+
+            throw new NotSupportedException(targetMethod?.Name);
+        }
     }
 }
