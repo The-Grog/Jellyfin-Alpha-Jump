@@ -65,7 +65,18 @@
         preferenceHandledUsers: new Set(),
         reportedPreferenceProblems: new Set(),
         loadListener: null,
-        firstPickerClick: null
+        firstPickerClick: null,
+        // A server plugin adds a small, unique bootstrap marker before loading
+        // this same file. Its configuration is deliberately loaded per library:
+        // a failed or malformed plugin response never falls back to the
+        // standalone defaults.
+        plugin: {
+            marker: null,
+            libraryId: null,
+            configuration: null,
+            pending: null,
+            failedLibraries: new Set()
+        }
     };
 
     function log(...args) {
@@ -74,6 +85,101 @@
 
     function reportError(...args) {
         console.error(LOG_PREFIX, ...args);
+    }
+
+    function pluginMarker() {
+        const markers = Array.from(doc?.querySelectorAll?.('#alpha-jump-plugin-bootstrap') || [])
+            .filter(marker => marker.getAttribute?.('data-alpha-jump-mode') === 'plugin');
+        if (markers.length !== 1) return null;
+        const configUrl = markers[0].getAttribute('data-alpha-jump-config-url');
+        return typeof configUrl === 'string' && configUrl ? { element: markers[0], configUrl } : null;
+    }
+
+    function pluginValue(payload, name) {
+        return payload?.[name] ?? payload?.[name[0].toUpperCase() + name.slice(1)];
+    }
+
+    // Jellyfin Web routes use an unhyphenated GUID while server-side Guid
+    // formatting may include hyphens. Compare the identifier, not its spelling.
+    function normalizeLibraryId(value) {
+        const compact = typeof value === 'string' ? value.replaceAll('-', '').toLowerCase() : '';
+        return /^[0-9a-f]{32}$/.test(compact) ? compact : null;
+    }
+
+    function validatePluginConfiguration(payload, libraryId) {
+        if (!payload || typeof payload !== 'object'
+            || pluginValue(payload, 'contractVersion') !== 1
+            || normalizeLibraryId(pluginValue(payload, 'libraryId')) === null
+            || normalizeLibraryId(pluginValue(payload, 'libraryId')) !== normalizeLibraryId(libraryId)) {
+            return null;
+        }
+        const fields = ['enabled', 'libraryEnabled', 'autoDisablePagination', 'smoothScroll', 'debug'];
+        if (fields.some(field => typeof pluginValue(payload, field) !== 'boolean')) return null;
+        return Object.fromEntries(fields.map(field => [field, pluginValue(payload, field)]));
+    }
+
+    function pluginMode() {
+        return state.plugin.marker !== null;
+    }
+
+    function pluginAllowsRoute(route) {
+        if (!pluginMode()) return true;
+        return state.plugin.libraryId === normalizeLibraryId(route.parentId)
+            && state.plugin.configuration !== null
+            && state.plugin.configuration.enabled
+            && state.plugin.configuration.libraryEnabled;
+    }
+
+    function configureFromPlugin(configuration) {
+        // The contract intentionally carries only Alpha Jump's own booleans.
+        // Do not merge arbitrary server configuration into the standalone API.
+        CONFIG.enabled = configuration.enabled;
+        CONFIG.autoDisablePagination = configuration.autoDisablePagination;
+        CONFIG.smoothScroll = configuration.smoothScroll;
+        CONFIG.debug = configuration.debug;
+    }
+
+    function loadPluginConfiguration(route) {
+        if (!pluginMode() || !route.kind || !route.parentId) return Promise.resolve();
+        const libraryId = normalizeLibraryId(route.parentId);
+        if (!libraryId) return Promise.reject(new Error('route library ID was invalid'));
+        if (state.plugin.libraryId === libraryId && state.plugin.configuration) return Promise.resolve();
+        if (state.plugin.pending?.libraryId === libraryId) return state.plugin.pending.promise;
+        if (state.plugin.failedLibraries.has(libraryId)) return Promise.reject(new Error('plugin configuration previously failed'));
+
+        const client = root.ApiClient;
+        if (!client || typeof client.ajax !== 'function') {
+            state.plugin.failedLibraries.add(libraryId);
+            reportError('Alpha Jump plugin configuration cannot use Jellyfin\'s authenticated API client. Native behavior remains available.');
+            return Promise.reject(new Error('plugin API client is unavailable'));
+        }
+
+        const url = `${state.plugin.marker.configUrl}${state.plugin.marker.configUrl.includes('?') ? '&' : '?'}libraryId=${encodeURIComponent(route.parentId)}`;
+        const pending = {
+            libraryId,
+            promise: client.ajax({ type: 'GET', url, dataType: 'json' })
+                .then(payload => {
+                    const configuration = validatePluginConfiguration(payload, libraryId);
+                    if (!configuration) throw new Error('plugin configuration response did not match contract v1');
+                    // A route can change while an authenticated request is in flight.
+                    // Store only the response for the route that requested it.
+                    state.plugin.libraryId = libraryId;
+                    state.plugin.configuration = configuration;
+                    configureFromPlugin(configuration);
+                })
+                .catch(caught => {
+                    state.plugin.failedLibraries.add(libraryId);
+                    state.plugin.libraryId = libraryId;
+                    state.plugin.configuration = null;
+                    reportError('Alpha Jump plugin configuration could not be loaded. Native behavior remains available.', caught);
+                    throw caught;
+                })
+                .finally(() => {
+                    if (state.plugin.pending === pending) state.plugin.pending = null;
+                })
+        };
+        state.plugin.pending = pending;
+        return pending.promise;
     }
 
     function canonical(value) {
@@ -121,6 +227,22 @@
         if (!route.parentId) return null;
         try {
             const raw = root.localStorage.getItem(`${route.kind} - ${route.parentId}`);
+            // LibraryProvider uses getDefaultLibraryViewSettings before the first
+            // native edit persists this key. Absence is a normal first visit,
+            // not an unsupported view. Mirror v12.1 Movies/Series defaults only;
+            // never overwrite storage or fill in incomplete persisted objects.
+            if (raw === null && (route.kind === 'movies' || route.kind === 'series')) {
+                return {
+                    ShowTitle: true,
+                    ShowYear: true,
+                    ViewMode: 'grid',
+                    ImageType: 'Primary',
+                    CardLayout: false,
+                    SortBy: ['SortName'],
+                    SortOrder: 'Ascending',
+                    StartIndex: 0
+                };
+            }
             return raw ? JSON.parse(raw) : null;
         } catch (caught) {
             reportError('Could not read library view settings.', caught);
@@ -456,6 +578,7 @@
     function isPotentiallySupported(context) {
         return !!context
             && context.route.supported
+            && pluginAllowsRoute(context.route)
             && hasPotentialUnpaginatedResult(context)
             && hasInitialIndex(context.settings)
             && context.settings.ViewMode === 'grid'
@@ -828,6 +951,27 @@
 
     function refreshSurface() {
         if (state.destroyed) return;
+        const route = routeInfo();
+        // Plugin mode never arms from standalone defaults. Wait for one
+        // authenticated, route-specific response before touching preferences or
+        // picker events; failed requests leave Jellyfin's native picker intact.
+        if (pluginMode() && route.kind && route.parentId && !pluginAllowsRoute(route)) {
+            const hasRouteConfiguration = state.plugin.libraryId === normalizeLibraryId(route.parentId)
+                && state.plugin.configuration !== null;
+            if (!hasRouteConfiguration && !state.plugin.failedLibraries.has(normalizeLibraryId(route.parentId))) {
+                void loadPluginConfiguration(route)
+                    .then(() => scheduleLifecycle())
+                    .catch(() => scheduleLifecycle());
+            }
+            cancelRun('Cancelled: plugin configuration changed.', false);
+            detachSurface(true);
+            return;
+        }
+        if (pluginMode() && (!route.kind || !route.parentId)) {
+            cancelRun('Cancelled: navigation changed.', false);
+            detachSurface(true);
+            return;
+        }
         const userId = configurePaginationPreference();
         if (!userId) {
             resetForUserChange(null);
@@ -880,6 +1024,7 @@
     function init() {
         if (!CONFIG.enabled || !doc || state.destroyed) return;
         if (root[INSTANCE_KEY]?.destroy) root[INSTANCE_KEY].destroy('re-injected');
+        state.plugin.marker = pluginMarker();
         state.hashChange = () => {
             cancelRun('Cancelled: navigation changed.', false);
             scheduleLifecycle();

@@ -43,3 +43,21 @@ The authorized Jellyfin 12.1 browser session later confirmed a saved-zero visual
 ## Decision
 
 The local code is suitable for review and a controlled temporary-browser trial. That trial will change the signed-in user's browser/origin-local library page-size setting and reload once; a console copy must be pasted again afterward. It is not ready for general JavaScript Injector installation: automatic preference application/restoration, served-DOM gating, native-clear timing, network parameters, performance, and Enhanced coexistence still need evidence.
+
+## Server-plugin delivery finding — 2026-09-21
+
+Jellyfin Server 12.1's published `Jellyfin.Controller` and `Jellyfin.Model` projects identify package version `12.1.0` and target `net10.0`. The official plugin template establishes `BasePlugin<TConfiguration>`, `IHasWebPages`, embedded configuration pages, controller endpoints, and `IPluginServiceRegistrator` as supported plugin surfaces. A stock ASP.NET Core `IStartupFilter` is the available route for in-memory index transformation; Jellyfin does not provide a dedicated public Web-file transformation API.
+
+The local plugin implementation uses that narrow middleware route and embeds the authoritative browser source at build time. Before the later SDK installation it had not been built locally, loaded into Jellyfin, or validated with the served 12.1 index path. No server, Injector setting, or source checkout was modified.
+
+### Build evidence update — 2026-09-21
+
+The local .NET 10 SDK `10.0.401` subsequently restored and built `Jellyfin.Plugin.AlphaJump` against the 12.1.0 packages with zero warnings/errors. Its xUnit suite passed 5/5 after adding test-only runtime package references; the production project still excludes those server-provided runtime assets. This closes only compile-time and focused pure-logic evidence. Plugin loading, controller discovery, the static-file response-body path, cache/compression behavior, and Jellyfin Enhanced/File Transformation coexistence remain open until an approved disposable-server test.
+
+### Review-finding correction update — 2026-09-21
+
+The XML-incompatible `Dictionary<Guid, bool>` was replaced with XML-compatible `LibrarySelectionRecord` values, and an actual `XmlSerializer` default/explicit-selection round trip passes. Collection GUIDs are now normalized to lower-case unhyphenated form at server, dashboard, and browser boundaries; JavaScript tests cover a realistic route/server spelling pair and a mismatch. The injection middleware now derives a configured-base prefix from the raw early-pipeline Web index path, with middleware (not helper-only) tests for root hosting, `/jellyfin` hosting, duplicate prevention, and API/media pass-through.
+
+Target-pipeline evidence was rechecked against the official Jellyfin Server `v12.1` tag `ee91c75e777da41a9c4f4855e70adc604fbf2ef8`: `Jellyfin.Server/Startup.cs` calls `app.Map(config.BaseUrl, mainApp => ...)`, and the mapped branch registers `UseDefaultFiles` and `UseStaticFiles` with `RequestPath = "/web"`. Since Alpha Jump's startup filter wraps that configure delegate, its outer middleware sees `/jellyfin/web/index.html` before the mapped branch reduces it to `/web/index.html`; deriving the prefix from the narrow Web-index suffix produces the correct same-origin script/config URLs. This is source and middleware-test evidence, not a served-server result.
+
+Library discovery now uses the supported `ILibraryManager` collection-folder surface and persists supported selection records under the same synchronization used for administrator saves. Automated transition tests cover initial default enablement, a new library after an automatic-policy change, rename/reload persistence, unsupported exclusion, and harmless stale selections. These findings are resolved at unit/test-host scope. The actual Jellyfin pipeline order, XML load through Jellyfin itself, administrator dashboard behavior, served base-URL injection, and browser/plugin compatibility remain unverified and are not resolved.

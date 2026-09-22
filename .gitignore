@@ -41,6 +41,10 @@ out/
 *.snupkg
 packages/
 .nuget/
+.nuget-packages/
+.nuget-appdata/
+.nuget-localappdata/
+.dotnet-cli/
 
 # ----------------------------
 # Test output

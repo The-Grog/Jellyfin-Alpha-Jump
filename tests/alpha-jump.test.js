@@ -85,7 +85,10 @@ function createHarness({
     cardCount = renderedCount,
     userId = 'active-user',
     library = 'movies',
-    loggedIn = true
+    routeLibraryId = 'library',
+    loggedIn = true,
+    pluginConfiguration = null,
+    pluginConfigurationFailure = false
 } = {}) {
     const shows = library === 'series';
     const pageId = shows ? 'tvshowsPage' : 'moviesPage';
@@ -136,6 +139,7 @@ function createHarness({
             if (selector === '#' + pageId) return [page];
             if (selector === '.MuiToolbar-root') return [toolbar];
             if (selector === '[role="banner"], .MuiAppBar-root') return [];
+            if (selector === '#alpha-jump-plugin-bootstrap') return pluginConfiguration ? [pluginMarker] : [];
             return [];
         },
         querySelector: selector => selector === '.docspinner.mdlSpinnerActive' ? null : null,
@@ -147,6 +151,11 @@ function createHarness({
     const storage = new Map([
         [`${library} - library`, JSON.stringify(settings)]
     ]);
+    const pluginMarker = pluginConfiguration ? new FakeElement() : null;
+    if (pluginMarker) {
+        pluginMarker.setAttribute('data-alpha-jump-mode', 'plugin');
+        pluginMarker.setAttribute('data-alpha-jump-config-url', '/AlphaJump/client-config');
+    }
     const sessionStorage = new Map();
     let reloads = 0;
     let activeUserId = userId;
@@ -154,7 +163,7 @@ function createHarness({
     const root = {
         document,
         location: {
-            hash: shows ? '#/tv?topParentId=library&collectionType=tvshows' : '#/movies?topParentId=library&collectionType=movies',
+            hash: shows ? '#/tv?topParentId=' + routeLibraryId + '&collectionType=tvshows' : '#/movies?topParentId=' + routeLibraryId + '&collectionType=movies',
             origin: 'http://jellyfin.test',
             reload: () => { reloads += 1; }
         },
@@ -170,7 +179,10 @@ function createHarness({
         },
         ApiClient: {
             getCurrentUserId: () => activeUserId,
-            isLoggedIn: () => isLoggedIn
+            isLoggedIn: () => isLoggedIn,
+            ajax: () => pluginConfigurationFailure
+                ? Promise.reject(new Error('server unavailable'))
+                : Promise.resolve(pluginConfiguration)
         },
         matchMedia: () => ({ matches: true }),
         getComputedStyle: () => ({ position: 'static' }),
@@ -549,3 +561,75 @@ test('zero preference can own clicks but cannot declare partial cards ready', ()
     h.storage.set('active-user-libraryPageSize','0');
     assert.equal(h.test.isReady(h.test.getContext()),false);
 });
+
+test('plugin mode validates a route-specific config before enabling automatic pagination setup', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = {
+        contractVersion: 1,
+        libraryId: '01234567-89ab-cdef-0123-456789abcdef',
+        enabled: true,
+        libraryEnabled: true,
+        autoDisablePagination: false,
+        smoothScroll: false,
+        debug: false
+    };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId });
+    h.init();
+    await turn();
+    assert.equal(h.storage.has('active-user-libraryPageSize'), false);
+    assert.equal(h.pickerRoot.listeners.has('click'), true);
+    assert.equal(h.api.config.smoothScroll, false);
+    h.api.destroy();
+});
+
+test('plugin config load failure does not fall back to standalone defaults or intercept clicks', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = {
+        contractVersion: 1,
+        libraryId: '01234567-89ab-cdef-0123-456789abcdef',
+        enabled: true,
+        libraryEnabled: true,
+        autoDisablePagination: true,
+        smoothScroll: true,
+        debug: false
+    };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, pluginConfigurationFailure: true });
+    h.init();
+    await turn();
+    assert.equal(h.storage.has('active-user-libraryPageSize'), false);
+    assert.equal(h.pickerRoot.listeners.has('click'), false);
+    h.api.destroy();
+});
+
+test('plugin config rejects a different normalized library ID', async () => {
+    const configuration = {
+        contractVersion: 1,
+        libraryId: 'fedcba98-7654-3210-fedc-ba9876543210',
+        enabled: true,
+        libraryEnabled: true,
+        autoDisablePagination: false,
+        smoothScroll: false,
+        debug: false
+    };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId: '0123456789abcdef0123456789abcdef' });
+    h.init();
+    await turn();
+    assert.equal(h.pickerRoot.listeners.has('click'), false);
+    h.api.destroy();
+});
+
+for (const library of ['movies', 'series']) {
+    test(library + ': absent view settings use native defaults on the very first click without writing storage', async () => {
+        const h = createHarness({ library, prefixes: ['KA', 'MA'] });
+        h.storage.delete(library + ' - library');
+        h.storage.set('active-user-libraryPageSize', '0');
+        h.init();
+        assert.equal(h.clickPicker('K').prevented, true);
+        await turn();
+        assert.equal(h.test.getState().selected, 'K');
+        assert.equal(h.settings.Alphabet, null);
+        assert.equal(h.storage.has(library + ' - library'), false);
+        assert.equal(h.scrollCalls.length, 1);
+        h.api.destroy();
+    });
+}

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Alpha Jump</title>
+</head>
+<body>
+    <div id="AlphaJumpConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="AlphaJumpConfigForm">
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="Enabled" type="checkbox" is="emby-checkbox" />
+                            <span>Enable Alpha Jump</span>
+                        </label>
+                        <div class="fieldDescription">Loads the browser enhancement only for enabled supported libraries.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AutoEnableNewSupportedLibraries" type="checkbox" is="emby-checkbox" />
+                            <span>Enable newly discovered Movies and Shows libraries</span>
+                        </label>
+                        <div class="fieldDescription">Does not change existing explicit selections.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="AutoDisablePagination" type="checkbox" is="emby-checkbox" />
+                            <span>Set the active browser user's library page size to zero</span>
+                        </label>
+                        <div class="fieldDescription">This browser-local setting affects all of that user's library views and can be expensive on large libraries.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="SmoothScroll" type="checkbox" is="emby-checkbox" />
+                            <span>Smooth scroll</span>
+                        </label>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="Debug" type="checkbox" is="emby-checkbox" />
+                            <span>Enable browser debug logging</span>
+                        </label>
+                    </div>
+
+                    <h2 class="sectionTitle">Libraries</h2>
+                    <p class="fieldDescription">Movies and Shows can be enabled individually. Other library types are shown for clarity but cannot be enabled.</p>
+                    <div id="AlphaJumpLibraries" class="verticalSection"></div>
+                    <div id="AlphaJumpStatus" class="fieldDescription" role="status" aria-live="polite"></div>
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <script type="text/javascript">
+            (function () {
+                'use strict';
+                var page = document.querySelector('#AlphaJumpConfigPage');
+                var form = document.querySelector('#AlphaJumpConfigForm');
+                var librariesRoot = document.querySelector('#AlphaJumpLibraries');
+                var status = document.querySelector('#AlphaJumpStatus');
+                var libraries = [];
+
+                function field(name) { return document.querySelector('#' + name); }
+                function value(item, name) { return item[name] !== undefined ? item[name] : item[name.charAt(0).toLowerCase() + name.slice(1)]; }
+                function setStatus(message) { status.textContent = message || ''; }
+                function normalizeId(id) {
+                    var compact = String(id || '').replace(/-/g, '').toLowerCase();
+                    return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+                }
+                function readConfiguration() {
+                    return ApiClient.ajax({
+                        type: 'GET',
+                        url: ApiClient.getUrl('AlphaJump/admin/config'),
+                        dataType: 'json'
+                    });
+                }
+                function renderLibraries(configuration) {
+                    librariesRoot.replaceChildren();
+                    if (!libraries.length) {
+                        librariesRoot.textContent = 'No media folders were returned by Jellyfin.';
+                        return;
+                    }
+                    libraries.forEach(function (library) {
+                        var holder = document.createElement('div');
+                        holder.className = 'checkboxContainer';
+                        var label = document.createElement('label');
+                        label.className = 'emby-checkbox-label';
+                        var checkbox = document.createElement('input');
+                        checkbox.type = 'checkbox';
+                        checkbox.setAttribute('is', 'emby-checkbox');
+                        checkbox.dataset.libraryId = normalizeId(value(library, 'LibraryId'));
+                        checkbox.checked = value(library, 'Enabled') === true;
+                        checkbox.disabled = value(library, 'Supported') !== true;
+                        var text = document.createElement('span');
+                        text.textContent = String(value(library, 'Name') || 'Unnamed library') + ' (' + String(value(library, 'CollectionType') || '') + ')';
+                        label.appendChild(checkbox);
+                        label.appendChild(text);
+                        holder.appendChild(label);
+                        var explanation = value(library, 'Explanation');
+                        if (explanation) {
+                            var reason = document.createElement('div');
+                            reason.className = 'fieldDescription';
+                            reason.textContent = explanation;
+                            holder.appendChild(reason);
+                        }
+                        librariesRoot.appendChild(holder);
+                    });
+                }
+                function fill(configuration) {
+                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
+                        var camel = name.charAt(0).toLowerCase() + name.slice(1);
+                        field(name).checked = configuration[name] !== undefined ? configuration[name] : configuration[camel] !== false;
+                    });
+                    renderLibraries(configuration);
+                }
+                function load() {
+                    Dashboard.showLoadingMsg();
+                    setStatus('');
+                    return readConfiguration()
+                        .then(function (configuration) {
+                            libraries = value(configuration, 'Libraries') || [];
+                            fill(configuration);
+                        })
+                        .catch(function () {
+                            libraries = [];
+                            librariesRoot.textContent = 'Could not read Alpha Jump configuration. Check that this page is opened by a Jellyfin administrator.';
+                            setStatus('Configuration was not changed.');
+                        })
+                        .finally(function () { Dashboard.hideLoadingMsg(); });
+                }
+                form.addEventListener('submit', function (event) {
+                    event.preventDefault();
+                    Dashboard.showLoadingMsg();
+                    var configuration = {};
+                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
+                        configuration[name] = field(name).checked;
+                    });
+                    configuration.LibrarySelections = [];
+                        libraries.forEach(function (library) {
+                            var id = normalizeId(value(library, 'LibraryId'));
+                            var checkbox = librariesRoot.querySelector('[data-library-id="' + id + '"]');
+                            if (checkbox && value(library, 'Supported') === true) {
+                                configuration.LibrarySelections.push({ LibraryId: id, Enabled: checkbox.checked });
+                            }
+                        });
+                    return ApiClient.ajax({
+                        type: 'POST',
+                        url: ApiClient.getUrl('AlphaJump/admin/config'),
+                        dataType: 'json',
+                        contentType: 'application/json',
+                        data: JSON.stringify(configuration)
+                    }).then(function (result) {
+                        libraries = value(result, 'Libraries') || libraries;
+                        fill(result);
+                        setStatus('Saved. Refresh a Jellyfin Web page to apply the changed browser configuration.');
+                    }).catch(function () {
+                        setStatus('Could not save Alpha Jump configuration.');
+                    }).finally(function () { Dashboard.hideLoadingMsg(); });
+                });
+                page.addEventListener('pageshow', load);
+            }());
+        </script>
+    </div>
+</body>
+</html>

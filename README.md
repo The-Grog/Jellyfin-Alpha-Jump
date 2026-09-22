@@ -1,6 +1,6 @@
 # Jellyfin Alpha Jump
 
-Experimental, browser-only enhancement for Jellyfin Web v12.1 Movies and Shows. It changes a supported alphabet-picker click from native letter filtering into a scroll to the first rendered card whose `data-prefix` starts with that letter.
+Experimental Jellyfin Web v12.1 enhancement for Movies and Shows. The same browser source can be used standalone or embedded by the included Jellyfin 12.1 server-plugin project. It changes a supported alphabet-picker click from native letter filtering into a scroll to the first rendered card whose `data-prefix` starts with that letter.
 
 This is not a server plugin, custom renderer, item fetcher, virtualizer, or continuously loading view. Jellyfin still fetches and renders the library; Alpha Jump only observes the rendered library page and scrolls it.
 
@@ -48,10 +48,31 @@ Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 ```powershell
 node --check src/alpha-jump.js
 node --test tests/alpha-jump.test.js
+dotnet build plugin/Jellyfin.Plugin.AlphaJump/Jellyfin.Plugin.AlphaJump.csproj --configuration Release
+dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --configuration Release
 git diff --check
 ```
 
 The tests are focused deterministic regressions, not a browser compatibility or performance result. See [docs/testing.md](docs/testing.md) for actual results and browser work still required.
+
+## Server-plugin prototype
+
+The project at [plugin/Jellyfin.Plugin.AlphaJump](plugin/Jellyfin.Plugin.AlphaJump) targets the Jellyfin 12.1 plugin ABI (`net10.0`, `Jellyfin.Controller` and `Jellyfin.Model` `12.1.0`). It embeds [src/alpha-jump.js](src/alpha-jump.js) directly at build time; there is no plugin-maintained copy of the browser source.
+
+It has a native Jellyfin dashboard configuration page with these defaults:
+
+- Global enhancement enabled; newly discovered supported libraries enabled.
+- Explicit per-library settings are XML-compatible records keyed only by a normalized stable collection-folder GUID, so renamed libraries retain their setting and deleted ones are harmless.
+- Discovery persists one record for each supported library before any dashboard visit. Existing supported libraries initially follow the default; later policy changes affect only libraries discovered afterward. Unsupported libraries are displayed disabled with an explanation.
+- Auto-disable pagination and smooth scrolling are enabled; debug logging is disabled.
+
+The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin's `ILibraryManager`, which synchronizes discovery and administrator writes under one lock. The injected browser code requests only an authenticated, per-library configuration response; it receives no library inventory. IDs are normalized to Jellyfin Web's unhyphenated GUID form at the server, dashboard, and browser boundaries. An unavailable or malformed response leaves the native picker alone rather than using standalone defaults.
+
+The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
+
+On 2026-09-21 this host built the production project with .NET SDK `10.0.401` (zero warnings) and ran the C# suite successfully (9 passed). The build output is local and ignored by Git; no plugin was installed, packaged, committed, pushed, or published. Served Jellyfin validation still requires a separately approved disposable-server test.
+
+To disable a future installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients; the current in-memory script can also be removed with `destroy()`. Before removing a future plugin, disable its injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test a future plugin while a JavaScript Injector Alpha Jump entry is still active. JellyTweaks can overwrite the same client page-size setting, so it must be disabled or set to zero for the unpaginated gate to arm. Music, books, photos, mixed libraries, and all native clients remain outside this initial plugin's support; no distribution manifest or release artifact exists yet.
 
 ## Temporary console trial only
 
@@ -121,3 +142,7 @@ Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`).
 For testing, replace the existing Injector entry with the updated source, save, and fully reload. Open Shows, select its main Shows tab, use Name ascending/grid, and clear native alphabet filtering. Try A, M, Z, then #, and verify all shows remain scrollable. Navigate Movies → Shows → Movies and verify both pickers. Episodes and other TV tabs should retain native behavior.
 
 If JellyTweaks is installed, its default library page-size override must also be zero (or disabled). The user confirmed its configured value of 100 was restoring pagination on reload; changing that override resolved the conflict.
+
+## First-use settings correction — 2026-09-21
+
+The user supplied before/after evidence: the Movies view-settings key did not exist before the first letter click and existed afterward. Jellyfin LibraryProvider uses getDefaultLibraryViewSettings for an absent key; Alpha Jump previously rejected it. The script now mirrors the pinned v12.1 Movies/Series defaults in memory only when the key is absent. Existing persisted settings remain authoritative; no storage write or synthetic native click is used to initialize them. Result completeness and loading checks remain required. Two production-path regressions reproduced first-click failure before the fix and pass afterward for Movies and Shows. All 26 tests pass; fresh-browser confirmation of this specific fix remains pending. Earlier timing fixes alone did not resolve the reported failure.

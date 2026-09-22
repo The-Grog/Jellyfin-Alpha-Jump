@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Jellyfin.Plugin.AlphaJump</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.AlphaJump</AssemblyName>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!-- Jellyfin 12.1 publishes these plugin ABI packages at 12.1.0. Runtime
+       assets stay with the server; the plugin must not ship its own copies. -->
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <!-- The standalone source is embedded directly; no second JS source exists. -->
+    <EmbeddedResource Include="..\..\src\alpha-jump.js" Link="Resources\alpha-jump.js" />
+  </ItemGroup>
+</Project>

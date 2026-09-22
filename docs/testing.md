@@ -66,3 +66,48 @@ User reports full results but native filtering on first navigation, with reload 
 ## First-click ownership follow-up — 2026-09-21
 
 User reports the first click still applies native filtering, while a second works. The prior mount repair did not cover a picker clicked before complete-result proof was available. A verified active-user page-size-zero preference now permits owning/queuing a click in a supported view while readiness is pending. It is not completeness evidence: actual jumping and missing-letter feedback now require non-pending cards exactly matching the toolbar total. The # shortcut uses the same readiness gate. New production-path tests cover a first K click during loading for both Movies and Shows, plus rejection of partial results. Live confirmation is still pending.
+
+## First-use settings correction — 2026-09-21
+
+The user supplied before/after evidence: the Movies view-settings key did not exist before the first letter click and existed afterward. Jellyfin LibraryProvider uses getDefaultLibraryViewSettings for an absent key; Alpha Jump previously rejected it. The script now mirrors the pinned v12.1 Movies/Series defaults in memory only when the key is absent. Existing persisted settings remain authoritative; no storage write or synthetic native click is used to initialize them. Result completeness and loading checks remain required. Two production-path regressions reproduced first-click failure before the fix and pass afterward for Movies and Shows. All 26 tests pass; fresh-browser confirmation of this specific fix remains pending. Earlier timing fixes alone did not resolve the reported failure.
+
+## Server-plugin prototype checks — 2026-09-21
+
+Before the later SDK install, the plugin source targeted the verified Jellyfin 12.1 package/ABI version (`net10.0`, `Jellyfin.Controller`/`Jellyfin.Model` `12.1.0`) but the local `dotnet` host had no SDK. C# restore, build, and xUnit execution were therefore not run at that point. The dated update below records the completed validation.
+
+`tests/alpha-jump.test.js` was extended and passed locally: 28 tests, 0 failures. The two added production-path checks exercise plugin-mode configuration before automatic pagination setup and a rejected configuration request that must not attach interception or use standalone defaults. Expected error output is from deliberate denied-storage and rejected-config tests.
+
+The unexecuted .NET test project contains configuration-selection cases (new-library default, explicit-selection persistence across auto-new changes, global disable/deleted ID safety) and pure injection cases (base-path URLs, one marker only, and no `<head>` passthrough). Run, without installing anything:
+
+```powershell
+dotnet build plugin/Jellyfin.Plugin.AlphaJump/Jellyfin.Plugin.AlphaJump.csproj --configuration Release
+dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --configuration Release
+```
+
+### SDK validation update — 2026-09-21
+
+The .NET 10 SDK was subsequently installed and reported version `10.0.401`. The production project restored and built successfully with **0 warnings, 0 errors**. The xUnit project initially exposed a test-host-only issue: the production project correctly excludes Jellyfin runtime assemblies because the server supplies them, but that left the standalone test host unable to load `MediaBrowser.Model`/`MediaBrowser.Common`. Test-only direct package references were added without changing production deployment assets. After that correction, `dotnet test ... --configuration Release --no-restore` passed **5/5** in 181 ms.
+
+The first NuGet restore needed an isolated local NuGet profile because the sandbox could not read the normal user profile; [NuGet.config](../NuGet.config) now makes the source explicit. No server process, configuration, Injector entry, plugin installation, or restart occurred. This resolves the local build/test blocker only; controller discovery, index rewriting, cache/compression behavior, and functional browser behavior are still untested.
+
+### Focused review-finding regression update — 2026-09-21
+
+The following automated checks were run after the configuration, ID, base-URL, and discovery corrections. This is local test-host evidence only; no Jellyfin server or browser was changed.
+
+| Check | Result | Coverage actually executed |
+| --- | --- | --- |
+| JavaScript syntax | Passed | `node --check src/alpha-jump.js` completed. |
+| JavaScript tests | Passed | `node --test tests/alpha-jump.test.js`: **29/29** passed. Plugin-mode tests now exercise the actual route/config load path with an unhyphenated route GUID, equivalent hyphenated server GUID, and a genuinely different GUID rejection. |
+| Plugin build | Passed | `dotnet build plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --no-restore`: **0 warnings, 0 errors** with SDK `10.0.401`. |
+| C# tests | Passed | `dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --no-build --no-restore`: **9/9** passed. Tests execute XML serialize/deserialize round trips, discovery-policy transitions, route-ID normalization, and the actual response-body middleware for root and `/jellyfin` paths, duplicate markers, API passthrough, and media passthrough. |
+
+Not performed: loading the plugin in Jellyfin, confirming its `IStartupFilter` order in a served 12.1 pipeline, observing actual configured-base-URL output, browser configuration-page authorization/rendering, cache/compression behavior, or any browser functional test with the plugin. Those remain required controlled-installation evidence.
+
+### Exact first controlled plugin test
+
+1. Use a server test copy and browser profile; do not use the production server first.
+2. Disable the JavaScript Injector Alpha Jump entry before testing the plugin, so duplicate delivery cannot hide an injection problem. Also note whether JellyTweaks, Jellyfin Enhanced, or File Transformation is active.
+3. Build with the .NET 10 SDK, inspect the output for only plugin-owned files, then follow a separate approved install/restart action. This milestone does not authorize it.
+4. After installation, request `/web/index.html` through the server and verify exactly one `alpha-jump-plugin-bootstrap` marker, base-URL-safe script/config URLs, normal HTML rendering, and no injection on an API/media request. Capture only sanitized headers; do not save tokens or HAR files.
+5. Sign in as an administrator, verify actual Movies/Shows folders and their GUID-backed checkboxes, then save an enable/disable change. Refresh the browser and verify the enabled library loads config and an excluded or unsupported one retains native behavior.
+6. Repeat the existing Movies/Shows functional and network checklist above. Verify `AlphaJump/client-config` is authenticated, returns no inventory, and a forced request failure retains native alphabet behavior.
