@@ -43,10 +43,10 @@ picker click (capture, supported state only)
   -> existing native alphabet? activate that same button once via bypass
   -> MutationObserver + one coalesced animation frame await ready state
   -> first card whose data-prefix startsWith(letter)
-  -> scroll with sticky-header/reduced-motion handling; local selection only
+  -> scroll with sticky-header/reduced-motion handling
 ```
 
-`#` and a re-click of the local selected letter skip matching, clear local selection, and scroll to zero. The script never presses Previous/Next, restores a page, counts page actions, or infers end-of-list from a pager.
+Every `A`–`Z` click follows this jump path, including a repeated letter. `#` alone skips matching and scrolls to zero. Alpha Jump creates no persistent visual or semantic alphabet selection; it does not add `aria-current`, custom marker attributes, or picker styling. The script never presses Previous/Next, restores a page, counts page actions, or infers end-of-list from a pager.
 
 The native-clear bypass is limited to the one programmatic click on the currently pressed native button. All other supported alphabet clicks are intercepted; unsupported clicks continue to native Jellyfin. This also prevents a rapid superseding click during a temporary no-card replacement from accidentally applying a native filter.
 
@@ -71,9 +71,9 @@ cannot intentionally configure zero again.
 
 The active result observer is scoped to `#moviesPage` plus the single source-shaped LibraryToolbar that AppLayout renders outside that page; it only considers card/no-items/pending/picker changes and coalesces each mutation burst to one animation frame. A non-suppressing page-scoped click observer schedules the same check after native toolbar/filter/sort/pager interactions, so a cached same-card query change is still noticed. A small document observer only notices insertion/removal of `#moviesPage` so the result observer can be attached after SPA navigation. It does not discover or rescan cards.
 
-Each request has an overall timeout and a readiness timeout, both cancellable. A route/hash, active-user, or query-identity change cancels current work. Query identity contains route, parent, and persisted view settings except native `Alphabet`; page-size is deliberately excluded because a guessed/stale client setting must not define a query. It also clears idle enhancement selection after a completed-query change.
+Each request has an overall timeout and a readiness timeout, both cancellable. A route/hash, active-user, or query-identity change cancels current work. Query identity contains route, parent, and persisted view settings except native `Alphabet`; page-size is deliberately excluded because a guessed/stale client setting must not define a query.
 
-`destroy()` removes capture/key/route/load listeners, both observers, timeouts/animation frames, feedback, injected style, and only enhancement-owned `alpha-jump-selected`, `data-alpha-jump-selected`, and `aria-current` markers. It does not change Jellyfin's native selection or pagination preference.
+`destroy()` removes capture/key/route/load listeners, both observers, timeouts/animation frames, and feedback. It does not change Jellyfin's native alphabet state or pagination preference.
 
 ## Historical paging experiment
 

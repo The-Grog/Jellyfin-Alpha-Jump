@@ -16,8 +16,8 @@ its normal filtering behavior.
 - Scrolls to the first card whose rendered `data-prefix` begins with the chosen
   alphabet letter instead of applying Jellyfin's alphabet filter.
 - Keeps non-alphabet filters and search constraints intact.
-- Clears its own selected state and returns to the top for `#` or a second click
-  on the selected letter.
+- Treats `A`–`Z` as stateless jump commands: repeated clicks repeat the jump
+  without a persistent highlighted or selected letter. `#` returns to the top.
 
 ## Requirements
 
@@ -98,8 +98,8 @@ At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`
 - Intercepts native alphabet activation only in the supported state.
 - Clears an existing native alphabet selection by activating its existing button once through a narrowly scoped bypass, then waits for the unfiltered result to be ready.
 - Preserves other persisted filters and search constraints; it has no request or API hooks.
-- Matches `data-prefix.startsWith(letter)`, scrolls to the first result, and marks only its own selection with `aria-current` and scoped styling. It does not alter native `aria-pressed`.
-- `#` and a second click on the enhancement-selected letter clear enhancement selection and scroll to the top.
+- Matches `data-prefix.startsWith(letter)` and scrolls to the first result. It creates no persistent letter selection, marker, custom style, or `aria-current` state, and does not alter native `aria-pressed`.
+- Every `A`–`Z` click repeats that letter's jump. Only `#` is Alpha Jump's return-to-top command.
 - Latest request wins. Escape and the small Cancel button stop a pending request; route, sort, filter, search, page-size, or index changes also cancel it.
 - Empty DOM or Jellyfin's query-specific pending toolbar bullet never count as a settled empty library. Waits are observer-driven, cancellable, and bounded.
 
@@ -193,7 +193,7 @@ These are implementation records, not a compatibility claim.
 | Unprefixed storage was a historical mistake | The served session had no unprefixed `libraryPageSize`, which correctly exposed the old implementation defect. v12.1 source shows that the correct active-user key is prefixed; this prototype now reads/writes only that key and preserves a scoped backup. |
 | Small results are resolved by equality, not a threshold | A toolbar total equal to the rendered Movie-card count proves that current result is complete, including <=100 results. A large number by itself proves nothing. An active native alphabet remains fail-closed until the same alphabet-clear query was previously confirmed. |
 | Readiness is a render-state question | `ItemsView` shows Loading while its result is pending, then Cards or `NoItemsMessage`. An empty DOM or cleared native alphabet button by itself is insufficient. |
-| Native alphabet selection is separately owned | The existing MUI ToggleButton deselects to `null`. Alpha Jump allows just that clear click through, then keeps its own visible `aria-current` selection without changing native `aria-pressed`. |
+| Native alphabet state remains Jellyfin-owned | The existing MUI ToggleButton deselects to `null`. Alpha Jump allows only that native clear click through when needed, then uses letters as stateless jump commands without changing native `aria-pressed`, adding `aria-current`, or leaving a custom marker. |
 | Card prefix is the match surface | Movie card wrappers expose `data-prefix`; matching uses literal `startsWith(letter)`, not equality or an unverified ordering shortcut. |
 | The former page scan is historical | The earlier Previous/Next experiment proved visible replacing pages cannot yield Plex-style continuous scrolling. This design removes its pager machinery in favour of v12.1's native zero-page-size path. |
 | Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it still arms only after the current result's toolbar/card equality and other view gates succeed. |

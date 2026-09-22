@@ -46,8 +46,6 @@
     const LOG_PREFIX = '[AlphaJump]';
     const state = {
         destroyed: false,
-        selected: null,
-        selectedQueryId: null,
         picker: null,
         pickerClick: null,
         page: null,
@@ -59,7 +57,6 @@
         sequence: 0,
         nativeBypassButton: null,
         feedback: null,
-        style: null,
         hashChange: null,
         popState: null,
         keyDown: null,
@@ -401,7 +398,6 @@
     function resetForUserChange(userId) {
         if (state.activeUserId === userId) return;
         cancelRun('Cancelled: signed-in user changed.', false);
-        clearSelection();
         detachSurface(true);
         state.confirmedUnpaginatedQueryId = null;
         state.confirmedUnpaginatedTotal = null;
@@ -651,52 +647,6 @@
         return cards.find(card => (card.dataset.prefix || '').startsWith(letter)) || null;
     }
 
-    function removeSelectionMarkers(picker) {
-        if (!picker) return;
-        picker.buttons.forEach(button => {
-            button.classList.remove('alpha-jump-selected');
-            button.removeAttribute('data-alpha-jump-selected');
-            button.removeAttribute('aria-current');
-        });
-    }
-
-    function ensureStyles() {
-        if (state.style?.isConnected) return;
-        const style = doc.createElement('style');
-        style.id = 'alpha-jump-prototype-style';
-        style.textContent = [
-            '.alphaPicker-fixed-right button[data-alpha-jump-selected="true"] {',
-            '  outline: 2px solid currentColor;',
-            '  outline-offset: -2px;',
-            '  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .22);',
-            '  font-weight: 700;',
-            '}'
-        ].join('\n');
-        doc.head.appendChild(style);
-        state.style = style;
-    }
-
-    function clearSelection() {
-        removeSelectionMarkers(state.picker);
-        state.selected = null;
-        state.selectedQueryId = null;
-    }
-
-    function applySelection(context, value) {
-        ensureStyles();
-        state.selected = value;
-        state.selectedQueryId = value === null ? null : context.queryId;
-        context.picker.buttons.forEach(button => {
-            const selected = button.value === value;
-            button.classList.toggle('alpha-jump-selected', selected);
-            if (selected) button.setAttribute('data-alpha-jump-selected', 'true');
-            else button.removeAttribute('data-alpha-jump-selected');
-            // This is enhancement-owned state. Native aria-pressed remains untouched.
-            if (selected) button.setAttribute('aria-current', 'true');
-            else button.removeAttribute('aria-current');
-        });
-    }
-
     function ensureFeedback(context) {
         if (state.feedback?.isConnected) return state.feedback;
         const feedback = doc.createElement('div');
@@ -898,7 +848,6 @@
             else readyContext = await waitForReady(run);
             if (!isCurrent(run)) return;
             if (value === '#') {
-                clearSelection();
                 scrollTop();
                 announce(readyContext, 'At the beginning.', false);
                 finishRun(run);
@@ -906,11 +855,9 @@
             }
             const card = firstMatch(readyContext.cards, value);
             if (card) {
-                applySelection(readyContext, value);
                 scrollToCard(card);
                 announce(readyContext, `First ${value} title.`, false);
             } else {
-                clearSelection();
                 announce(readyContext, `No matching ${value} titles.`, false);
             }
             finishRun(run);
@@ -919,10 +866,8 @@
             const current = getContext();
             finishRun(run);
             if (current && /query changed/.test(String(caught?.message))) {
-                clearSelection();
                 announce(current, 'Cancelled: library query changed.', false);
             } else if (current && /unsupported/.test(String(caught?.message))) {
-                clearSelection();
                 announce(current, 'Alpha Jump is unavailable for this view.', false);
             } else if (current && /timeout/.test(String(caught?.message))) {
                 announce(current, 'Search incomplete: Jellyfin results did not settle.', false);
@@ -947,9 +892,7 @@
         event.preventDefault();
         event.stopImmediatePropagation();
         const value = button.value;
-        if ((value === '#' || (state.selected === value && state.selectedQueryId === context.queryId))
-            && isReady(context) && !state.run) {
-            clearSelection();
+        if (value === '#' && isReady(context) && !state.run) {
             scrollTop();
             announce(context, 'At the beginning.', false);
             return;
@@ -988,7 +931,6 @@
         if (state.picker?.root && state.pickerClick) {
             state.picker.root.removeEventListener('click', state.pickerClick, true);
         }
-        removeSelectionMarkers(state.picker);
         state.picker = null;
         state.pickerClick = null;
         if (state.page && state.pageClick) state.page.removeEventListener('click', state.pageClick);
@@ -1040,7 +982,6 @@
         if (state.run && (!context || context.route.hash !== state.run.routeHash || context.queryId !== state.run.queryId)) {
             cancelRun('Cancelled: library query changed.', true);
         }
-        if (state.selected && (!context || state.selectedQueryId !== context.queryId)) clearSelection();
         if (!isPotentiallySupported(context)) {
             detachSurface(true);
             return;
@@ -1134,8 +1075,6 @@
         root.removeEventListener('load', state.loadListener);
         doc.removeEventListener('keydown', state.keyDown, true);
         doc.removeEventListener('click', state.firstPickerClick, true);
-        state.style?.remove();
-        state.style = null;
         if (root[INSTANCE_KEY] === api) delete root[INSTANCE_KEY];
         log(reason);
     }
@@ -1166,7 +1105,6 @@
         backupKey,
         configurePaginationPreference,
         restorePaginationPreference,
-        removeSelectionMarkers,
         getContext,
         attachSurface,
         detachSurface,

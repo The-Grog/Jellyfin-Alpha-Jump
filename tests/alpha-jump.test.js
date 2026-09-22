@@ -276,6 +276,14 @@ function createHarness({
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 
+function assertNoPersistentAlphaJumpMarker(harness) {
+    harness.buttons.forEach(button => {
+        assert.equal(button.classNames.has('alpha-jump-selected'), false);
+        assert.equal(button.getAttribute('data-alpha-jump-selected'), null);
+        assert.equal(button.getAttribute('aria-current'), null);
+    });
+}
+
 test('production context requires complete rendered cards and explicit StartIndex zero', () => {
     const complete = createHarness();
     assert.equal(complete.test.hasCompleteUnpaginatedResult(complete.test.getContext()), true);
@@ -417,6 +425,43 @@ test('# goes through the production native-clear and readiness path before scrol
     assert.equal(harness.buttons.find(button => button.value === 'M').getAttribute('aria-pressed'), 'false');
     assert.equal(harness.scrollCalls.at(-1).top, 0);
     assert.equal(harness.test.getState().run, null);
+    assertNoPersistentAlphaJumpMarker(harness);
+});
+
+test('repeated letter clicks are independent jump commands with no persistent marker', async () => {
+    const harness = createHarness({ prefixes: ['MA', 'MZ', 'ZA'] });
+    harness.test.attachSurface(harness.test.getContext());
+
+    const first = harness.clickPicker('M');
+    await turn();
+    const firstDestination = harness.scrollCalls.at(-1);
+    const second = harness.clickPicker('M');
+    await turn();
+
+    assert.equal(first.prevented, true);
+    assert.equal(second.prevented, true);
+    assert.equal(harness.settings.Alphabet, null);
+    assert.equal(harness.buttons.find(button => button.value === 'M').getAttribute('aria-pressed'), 'false');
+    assert.equal(harness.scrollCalls.length, 2);
+    assert.equal(firstDestination.top, 88);
+    assert.equal(harness.scrollCalls.at(-1).top, 88);
+    assert.notEqual(harness.scrollCalls.at(-1).top, 0);
+    assert.equal(harness.test.getState().feedback.children[0].textContent, 'First M title.');
+    assertNoPersistentAlphaJumpMarker(harness);
+});
+
+test('# remains the explicit return-to-beginning command after a letter jump', async () => {
+    const harness = createHarness({ prefixes: ['MA', 'ZA'] });
+    harness.test.attachSurface(harness.test.getContext());
+    harness.clickPicker('M');
+    await turn();
+    const beginning = harness.clickPicker('#');
+
+    assert.equal(beginning.prevented, true);
+    assert.equal(harness.scrollCalls.at(-1).top, 0);
+    assert.equal(harness.test.getState().feedback.children[0].textContent, 'At the beginning.');
+    assert.equal(harness.buttons.find(button => button.value === '#').getAttribute('aria-pressed'), 'false');
+    assertNoPersistentAlphaJumpMarker(harness);
 });
 
 test('a native alphabet subset is eligible only after this query was proven fully unpaginated', () => {
@@ -438,17 +483,22 @@ test('production waiter remains pending for the toolbar bullet and resolves from
     assert.notEqual(harness.test.getState().run, null);
     harness.setLoading(false);
     await pending;
-    assert.equal(harness.test.getState().selected, 'A');
+    assert.equal(harness.scrollCalls.length, 1);
+    assert.equal(harness.scrollCalls[0].top, 88);
+    assert.equal(harness.buttons.find(button => button.value === 'A').getAttribute('aria-pressed'), 'false');
+    assertNoPersistentAlphaJumpMarker(harness);
 });
 
-test('a real second execute cancels the first waiter and only the latest request selects', async () => {
+test('a real second execute cancels the first waiter and only the latest request scrolls', async () => {
     const harness = createHarness({ loading: true, prefixes: ['AL', 'ZM'] });
     const first = harness.test.execute(harness.test.getContext(), 'A');
     await turn();
     const latest = harness.test.execute(harness.test.getContext(), 'Z');
     harness.setLoading(false);
     await Promise.all([first, latest]);
-    assert.equal(harness.test.getState().selected, 'Z');
+    assert.equal(harness.scrollCalls.length, 1);
+    assert.equal(harness.scrollCalls[0].top, 88);
+    assertNoPersistentAlphaJumpMarker(harness);
 });
 
 test('a production waiter cancels when the persisted query identity changes', async () => {
@@ -459,24 +509,24 @@ test('a production waiter cancels when the persisted query identity changes', as
     harness.persist();
     harness.notify(harness.chip);
     await pending;
-    assert.equal(harness.test.getState().selected, null);
     assert.equal(harness.scrollCalls.length, 0);
+    assertNoPersistentAlphaJumpMarker(harness);
 });
 
-test('production detach removes its listener and only its selection markers', () => {
+test('production detach removes its listener and feedback without changing native button state', async () => {
     const harness = createHarness();
     const context = harness.test.getContext();
     harness.test.attachSurface(context);
     const button = harness.buttons[1];
-    button.classList.add('alpha-jump-selected');
-    button.setAttribute('data-alpha-jump-selected', 'true');
-    button.setAttribute('aria-current', 'true');
     button.setAttribute('aria-pressed', 'false');
+    await harness.test.execute(context, 'A');
+    const feedback = harness.test.getState().feedback;
+    assert.ok(feedback?.isConnected);
     harness.test.detachSurface(true);
     assert.equal(harness.pickerRoot.listeners.has('click'), false);
-    assert.equal(button.getAttribute('data-alpha-jump-selected'), null);
-    assert.equal(button.getAttribute('aria-current'), null);
+    assert.equal(feedback.isConnected, false);
     assert.equal(button.getAttribute('aria-pressed'), 'false');
+    assertNoPersistentAlphaJumpMarker(harness);
 });
 
 test('Shows route uses series settings and Series cards and jumps without native filtering', async () => {
@@ -488,8 +538,10 @@ test('Shows route uses series settings and Series cards and jumps without native
     const event = h.clickPicker('A');
     await turn();
     assert.equal(event.prevented, true);
-    assert.equal(h.test.getState().selected, 'A');
+    assert.equal(h.scrollCalls.length, 1);
     assert.equal(h.settings.Alphabet, null);
+    assert.equal(h.buttons.find(button => button.value === 'A').getAttribute('aria-pressed'), 'false');
+    assertNoPersistentAlphaJumpMarker(h);
     h.api.destroy();
 });
 test('Shows non-main tabs and explicit opt-outs remain native', () => {
@@ -537,8 +589,9 @@ test('first-click recovery intercepts a ready picker even without a mount notifi
     h.documentListeners.get('click')(event);
     assert.equal(event.prevented, true);
     await turn();
-    assert.equal(h.test.getState().selected, 'A');
+    assert.equal(h.scrollCalls.length, 1);
     assert.equal(h.settings.Alphabet, null);
+    assertNoPersistentAlphaJumpMarker(h);
     h.api.destroy();
     assert.equal(h.documentListeners.has('click'), false);
 });
@@ -555,8 +608,8 @@ for (const library of ['movies', 'series']) {
         assert.equal(h.settings.Alphabet, null);
         h.setLoading(false);
         await turn();
-        assert.equal(h.test.getState().selected, 'K');
         assert.equal(h.scrollCalls.length, 1);
+        assertNoPersistentAlphaJumpMarker(h);
         h.api.destroy();
     });
 }
@@ -652,10 +705,10 @@ for (const library of ['movies', 'series']) {
         h.init();
         assert.equal(h.clickPicker('K').prevented, true);
         await turn();
-        assert.equal(h.test.getState().selected, 'K');
         assert.equal(h.settings.Alphabet, null);
         assert.equal(h.storage.has(library + ' - library'), false);
         assert.equal(h.scrollCalls.length, 1);
+        assertNoPersistentAlphaJumpMarker(h);
         h.api.destroy();
     });
 }
