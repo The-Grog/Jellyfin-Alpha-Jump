@@ -73,6 +73,10 @@ The Alpha Jump settings page provides:
   unpaginated setup; enabled by default.
 - **Smooth scroll** and **Enable browser debug logging**.
 
+If JellyTweaks is installed and controls Library Page Size, set its override to
+`0` as well (or disable that override). Otherwise JellyTweaks can restore a
+nonzero page size after Alpha Jump reloads.
+
 Library choices use stable Jellyfin library IDs, so they survive a rename.
 
 ## Safety conditions
