@@ -87,6 +87,7 @@ function createHarness({
     library = 'movies',
     routeLibraryId = 'library',
     loggedIn = true,
+    apiAvailable = true,
     pluginConfiguration = null,
     pluginConfigurationFailure = false
 } = {}) {
@@ -160,6 +161,14 @@ function createHarness({
     let reloads = 0;
     let activeUserId = userId;
     let isLoggedIn = loggedIn;
+    let isApiAvailable = apiAvailable;
+    const apiClient = {
+        getCurrentUserId: () => activeUserId,
+        isLoggedIn: () => isLoggedIn,
+        ajax: () => pluginConfigurationFailure
+            ? Promise.reject(new Error('server unavailable'))
+            : Promise.resolve(pluginConfiguration)
+    };
     const root = {
         document,
         location: {
@@ -177,13 +186,7 @@ function createHarness({
             setItem: (key, value) => sessionStorage.set(key, String(value)),
             removeItem: key => sessionStorage.delete(key)
         },
-        ApiClient: {
-            getCurrentUserId: () => activeUserId,
-            isLoggedIn: () => isLoggedIn,
-            ajax: () => pluginConfigurationFailure
-                ? Promise.reject(new Error('server unavailable'))
-                : Promise.resolve(pluginConfiguration)
-        },
+        get ApiClient() { return isApiAvailable ? apiClient : null; },
         matchMedia: () => ({ matches: true }),
         getComputedStyle: () => ({ position: 'static' }),
         scrollY: 0,
@@ -266,6 +269,7 @@ function createHarness({
         sessionStorage,
         setUser: value => { activeUserId = value; },
         setLoggedIn: value => { isLoggedIn = value; },
+        setApiAvailable: value => { isApiAvailable = value; },
         get reloads() { return reloads; }
     };
 }
@@ -598,6 +602,28 @@ test('plugin config load failure does not fall back to standalone defaults or in
     await turn();
     assert.equal(h.storage.has('active-user-libraryPageSize'), false);
     assert.equal(h.pickerRoot.listeners.has('click'), false);
+    h.api.destroy();
+});
+
+test('plugin mode retries a temporarily unavailable ApiClient and arms when it appears', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = {
+        contractVersion: 1,
+        libraryId: '01234567-89ab-cdef-0123-456789abcdef',
+        enabled: true,
+        libraryEnabled: true,
+        autoDisablePagination: false,
+        smoothScroll: false,
+        debug: false
+    };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, apiAvailable: false });
+    h.api.config.pluginApiRetryDelayMs = 1;
+    h.init();
+    await turn();
+    assert.equal(h.pickerRoot.listeners.has('click'), false);
+    h.setApiAvailable(true);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(h.pickerRoot.listeners.has('click'), true);
     h.api.destroy();
 });
 

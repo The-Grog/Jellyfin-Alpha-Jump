@@ -122,7 +122,7 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
                 library.Name,
                 library.CollectionType,
                 library.IsSupported,
-                library.IsSupported && LibrarySelection.IsEnabled(configuration, library.Id),
+                library.IsSupported && LibrarySelection.IsSelectionEnabled(configuration, library.Id),
                 library.UnsupportedReason)).ToArray());
     }
 }

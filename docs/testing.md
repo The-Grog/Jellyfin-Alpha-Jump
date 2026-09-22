@@ -97,11 +97,13 @@ The following automated checks were run after the configuration, ID, base-URL, a
 | Check | Result | Coverage actually executed |
 | --- | --- | --- |
 | JavaScript syntax | Passed | `node --check src/alpha-jump.js` completed. |
-| JavaScript tests | Passed | `node --test tests/alpha-jump.test.js`: **29/29** passed. Plugin-mode tests now exercise the actual route/config load path with an unhyphenated route GUID, equivalent hyphenated server GUID, and a genuinely different GUID rejection. |
+| JavaScript tests | Passed | `node --test tests/alpha-jump.test.js`: **30/30** passed. Plugin-mode tests exercise the actual route/config load path with an unhyphenated route GUID, equivalent hyphenated server GUID, a genuinely different GUID rejection, and a temporarily absent `ApiClient` that becomes available before the bounded retry window expires. |
 | Plugin build | Passed | `dotnet build plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --no-restore`: **0 warnings, 0 errors** with SDK `10.0.401`. |
 | C# tests | Passed | `dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --no-build --no-restore`: **9/9** passed. Tests execute XML serialize/deserialize round trips, discovery-policy transitions, route-ID normalization, and the actual response-body middleware for root and `/jellyfin` paths, duplicate markers, API passthrough, and media passthrough. |
 
 Not performed: loading the plugin in Jellyfin, confirming its `IStartupFilter` order in a served 12.1 pipeline, observing actual configured-base-URL output, browser configuration-page authorization/rendering, cache/compression behavior, or any browser functional test with the plugin. Those remain required controlled-installation evidence.
+
+The C# XML/configuration regression also asserts that a globally disabled configuration reports a saved library selection independently of runtime enablement. The administrator mapper uses that saved state, so a global-disable save/re-enable cycle does not convert existing enabled rows to disabled selections. This remains test-host evidence; the served dashboard workflow is still unperformed.
 
 ### Exact first controlled plugin test
 

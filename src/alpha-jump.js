@@ -35,7 +35,11 @@
         // Bounds a native alphabet-clear replacement and initial readiness wait.
         maxReadyWaitMs: 8000,
         // Bounds a complete request, including the optional native clear.
-        maxElapsedMs: 15000
+        maxElapsedMs: 15000,
+        // Plugin injection can run before Jellyfin publishes ApiClient. Retry
+        // that public readiness boundary briefly without polling indefinitely.
+        maxPluginApiRetries: 8,
+        pluginApiRetryDelayMs: 250
     };
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
@@ -75,7 +79,9 @@
             libraryId: null,
             configuration: null,
             pending: null,
-            failedLibraries: new Set()
+            failedLibraries: new Set(),
+            readinessRetry: null,
+            readinessFailureReported: new Set()
         }
     };
 
@@ -139,6 +145,50 @@
         CONFIG.debug = configuration.debug;
     }
 
+    function clearPluginReadinessRetry(libraryId = null) {
+        const retry = state.plugin.readinessRetry;
+        if (!retry || (libraryId && retry.libraryId !== libraryId)) return;
+        if (retry.timer) root.clearTimeout(retry.timer);
+        state.plugin.readinessRetry = null;
+    }
+
+    function pluginClientIsReady(client) {
+        if (!client || typeof client.ajax !== 'function') return false;
+        try {
+            return typeof client.isLoggedIn !== 'function' || client.isLoggedIn();
+        } catch {
+            return false;
+        }
+    }
+
+    function schedulePluginReadinessRetry(route, libraryId) {
+        const previous = state.plugin.readinessRetry;
+        if (previous?.libraryId === libraryId && previous.timer) return;
+        if (previous && previous.libraryId !== libraryId) clearPluginReadinessRetry();
+        const attempts = previous?.libraryId === libraryId ? previous.attempts + 1 : 1;
+        if (attempts > CONFIG.maxPluginApiRetries) {
+            if (!state.plugin.readinessFailureReported.has(libraryId)) {
+                state.plugin.readinessFailureReported.add(libraryId);
+                reportError('Alpha Jump plugin configuration did not become available during startup. Native behavior remains available.');
+            }
+            state.plugin.readinessRetry = { libraryId, attempts, timer: null };
+            return;
+        }
+
+        const retry = { libraryId, attempts, timer: null };
+        retry.timer = root.setTimeout(() => {
+            retry.timer = null;
+            if (state.destroyed || state.plugin.readinessRetry !== retry) return;
+            const currentRoute = routeInfo();
+            if (normalizeLibraryId(currentRoute.parentId) !== libraryId) return;
+            void loadPluginConfiguration(currentRoute)
+                .then(loaded => { if (loaded) scheduleLifecycle(); })
+                .catch(() => scheduleLifecycle());
+        }, CONFIG.pluginApiRetryDelayMs);
+        state.plugin.readinessRetry = retry;
+        log('waiting for Jellyfin plugin API readiness', attempts);
+    }
+
     function loadPluginConfiguration(route) {
         if (!pluginMode() || !route.kind || !route.parentId) return Promise.resolve();
         const libraryId = normalizeLibraryId(route.parentId);
@@ -148,11 +198,11 @@
         if (state.plugin.failedLibraries.has(libraryId)) return Promise.reject(new Error('plugin configuration previously failed'));
 
         const client = root.ApiClient;
-        if (!client || typeof client.ajax !== 'function') {
-            state.plugin.failedLibraries.add(libraryId);
-            reportError('Alpha Jump plugin configuration cannot use Jellyfin\'s authenticated API client. Native behavior remains available.');
-            return Promise.reject(new Error('plugin API client is unavailable'));
+        if (!pluginClientIsReady(client)) {
+            schedulePluginReadinessRetry(route, libraryId);
+            return Promise.resolve(false);
         }
+        clearPluginReadinessRetry(libraryId);
 
         const url = `${state.plugin.marker.configUrl}${state.plugin.marker.configUrl.includes('?') ? '&' : '?'}libraryId=${encodeURIComponent(route.parentId)}`;
         const pending = {
@@ -166,6 +216,7 @@
                     state.plugin.libraryId = libraryId;
                     state.plugin.configuration = configuration;
                     configureFromPlugin(configuration);
+                    return true;
                 })
                 .catch(caught => {
                     state.plugin.failedLibraries.add(libraryId);
@@ -952,15 +1003,19 @@
     function refreshSurface() {
         if (state.destroyed) return;
         const route = routeInfo();
+        const normalizedRouteLibraryId = normalizeLibraryId(route.parentId);
+        if (state.plugin.readinessRetry && state.plugin.readinessRetry.libraryId !== normalizedRouteLibraryId) {
+            clearPluginReadinessRetry();
+        }
         // Plugin mode never arms from standalone defaults. Wait for one
         // authenticated, route-specific response before touching preferences or
         // picker events; failed requests leave Jellyfin's native picker intact.
         if (pluginMode() && route.kind && route.parentId && !pluginAllowsRoute(route)) {
-            const hasRouteConfiguration = state.plugin.libraryId === normalizeLibraryId(route.parentId)
+            const hasRouteConfiguration = state.plugin.libraryId === normalizedRouteLibraryId
                 && state.plugin.configuration !== null;
-            if (!hasRouteConfiguration && !state.plugin.failedLibraries.has(normalizeLibraryId(route.parentId))) {
+            if (!hasRouteConfiguration && !state.plugin.failedLibraries.has(normalizedRouteLibraryId)) {
                 void loadPluginConfiguration(route)
-                    .then(() => scheduleLifecycle())
+                    .then(loaded => { if (loaded) scheduleLifecycle(); })
                     .catch(() => scheduleLifecycle());
             }
             cancelRun('Cancelled: plugin configuration changed.', false);
@@ -1069,6 +1124,7 @@
         if (state.destroyed) return;
         state.destroyed = true;
         if (state.lifecycleFrame) root.cancelAnimationFrame(state.lifecycleFrame);
+        clearPluginReadinessRetry();
         cancelRun(null, false);
         detachSurface(true);
         state.mountObserver?.disconnect();

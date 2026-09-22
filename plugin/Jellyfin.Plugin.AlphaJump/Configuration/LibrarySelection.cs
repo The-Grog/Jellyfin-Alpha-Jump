@@ -13,11 +13,17 @@ public static class LibrarySelection
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        if (!configuration.Enabled)
-        {
-            return false;
-        }
+        return configuration.Enabled && IsSelectionEnabled(configuration, libraryId);
+    }
 
+    /// <summary>
+    /// Gets the persisted per-library choice without applying the global switch.
+    /// The administrator page uses this so temporarily disabling Alpha Jump does
+    /// not visually erase choices and overwrite them on a later save.
+    /// </summary>
+    public static bool IsSelectionEnabled(PluginConfiguration configuration, Guid libraryId)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
         var normalized = LibraryId.Normalize(libraryId);
         var selection = configuration.LibrarySelections?.FirstOrDefault(
             item => LibraryId.TryNormalize(item.LibraryId, out var itemId)

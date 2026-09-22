@@ -32,6 +32,7 @@ public class LibrarySelectionTests
         Assert.False(LibrarySelection.IsEnabled(configuration, disabled));
         configuration.Enabled = false;
         Assert.False(LibrarySelection.IsEnabled(configuration, enabled));
+        Assert.True(LibrarySelection.IsSelectionEnabled(configuration, enabled));
     }
 
     [Fact]

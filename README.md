@@ -4,6 +4,8 @@ Experimental Jellyfin Web v12.1 enhancement for Movies and Shows. The same brows
 
 This is not a server plugin, custom renderer, item fetcher, virtualizer, or continuously loading view. Jellyfin still fetches and renders the library; Alpha Jump only observes the rendered library page and scrolls it.
 
+**If JellyTweaks is installed, its default library page-size override must also be zero (or disabled). The user confirmed its configured value of 100 was restoring pagination on reload; changing that override resolved the conflict.**
+
 ## Required setup
 
 When enabled, Alpha Jump automatically configures the signed-in Jellyfin user's
@@ -66,7 +68,7 @@ It has a native Jellyfin dashboard configuration page with these defaults:
 - Discovery persists one record for each supported library before any dashboard visit. Existing supported libraries initially follow the default; later policy changes affect only libraries discovered afterward. Unsupported libraries are displayed disabled with an explanation.
 - Auto-disable pagination and smooth scrolling are enabled; debug logging is disabled.
 
-The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin's `ILibraryManager`, which synchronizes discovery and administrator writes under one lock. The injected browser code requests only an authenticated, per-library configuration response; it receives no library inventory. IDs are normalized to Jellyfin Web's unhyphenated GUID form at the server, dashboard, and browser boundaries. An unavailable or malformed response leaves the native picker alone rather than using standalone defaults.
+The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin's `ILibraryManager`, which synchronizes discovery and administrator writes under one lock. Its per-library checkboxes reflect their saved choices even when the global switch is temporarily off, so re-enabling cannot erase them. The injected browser code requests only an authenticated, per-library configuration response; it receives no library inventory. IDs are normalized to Jellyfin Web's unhyphenated GUID form at the server, dashboard, and browser boundaries. An unavailable or malformed response leaves the native picker alone rather than using standalone defaults; an early missing public `ApiClient` is retried for a small bounded startup window.
 
 The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
 
@@ -140,9 +142,3 @@ The previous sequential native-page scan is retained as historical evidence in [
 Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. Set `showsEnabled: false` or `moviesOnly: true` to retain Movies-only behavior. Source and local regression tests verify the hooks; Shows has not yet been tested in the live browser.
 
 For testing, replace the existing Injector entry with the updated source, save, and fully reload. Open Shows, select its main Shows tab, use Name ascending/grid, and clear native alphabet filtering. Try A, M, Z, then #, and verify all shows remain scrollable. Navigate Movies → Shows → Movies and verify both pickers. Episodes and other TV tabs should retain native behavior.
-
-If JellyTweaks is installed, its default library page-size override must also be zero (or disabled). The user confirmed its configured value of 100 was restoring pagination on reload; changing that override resolved the conflict.
-
-## First-use settings correction — 2026-09-21
-
-The user supplied before/after evidence: the Movies view-settings key did not exist before the first letter click and existed afterward. Jellyfin LibraryProvider uses getDefaultLibraryViewSettings for an absent key; Alpha Jump previously rejected it. The script now mirrors the pinned v12.1 Movies/Series defaults in memory only when the key is absent. Existing persisted settings remain authoritative; no storage write or synthetic native click is used to initialize them. Result completeness and loading checks remain required. Two production-path regressions reproduced first-click failure before the fix and pass afterward for Movies and Shows. All 26 tests pass; fresh-browser confirmation of this specific fix remains pending. Earlier timing fixes alone did not resolve the reported failure.
