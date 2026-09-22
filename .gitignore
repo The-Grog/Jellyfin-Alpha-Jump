@@ -88,9 +88,10 @@ desktop.ini
 # ----------------------------
 # Generated binaries
 # ----------------------------
-*.dll
+#*.dll
 *.pdb
 *.exe
+deploycmd.md
 
 # ----------------------------
 # Publish output

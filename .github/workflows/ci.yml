@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate browser source
+        run: |
+          node --check src/alpha-jump.js
+          node --test tests/alpha-jump.test.js
+          node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync('manifest.json', 'utf8')); if (!Array.isArray(manifest) || manifest.length !== 1 || manifest[0].guid !== '4dd1ed79-9e5e-441e-8ca3-8f1b29601a48' || !Array.isArray(manifest[0].versions)) process.exit(1);"
+
+      - name: Restore .NET dependencies
+        run: dotnet restore plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj
+
+      - name: Build plugin and tests
+        run: dotnet build plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --configuration Release --no-restore
+
+      - name: Run C# tests
+        run: dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --configuration Release --no-build --no-restore

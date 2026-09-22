@@ -1,0 +1,161 @@
+name: Release Alpha Jump
+
+on:
+  push:
+    tags:
+      - 'v*.*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release, for example v0.1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      PLUGIN_PROJECT: plugin/Jellyfin.Plugin.AlphaJump/Jellyfin.Plugin.AlphaJump.csproj
+      TEST_PROJECT: plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj
+      PLUGIN_DLL: Jellyfin.Plugin.AlphaJump.dll
+      TARGET_ABI: 12.0.0.0
+    steps:
+      - name: Determine tag
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="$REF_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then tag="$INPUT_TAG"; fi
+          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Expected a tag like v0.1.0.0, got: $tag" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out tagged source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Validate browser source
+        run: |
+          node --check src/alpha-jump.js
+          node --test tests/alpha-jump.test.js
+
+      - name: Restore .NET dependencies
+        run: dotnet restore "$TEST_PROJECT"
+
+      - name: Build tagged plugin and tests
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          dotnet build "$TEST_PROJECT" --configuration Release --no-restore \
+            -p:Version="$VERSION" -p:AssemblyVersion="$VERSION" -p:FileVersion="$VERSION"
+
+      - name: Run C# tests
+        run: dotnet test "$TEST_PROJECT" --configuration Release --no-build --no-restore
+
+      - name: Package the plugin DLL only
+        id: package
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          mkdir -p artifacts
+          zip_path="artifacts/alpha-jump_${VERSION}.zip"
+          dll_path="plugin/Jellyfin.Plugin.AlphaJump/bin/Release/net10.0/${PLUGIN_DLL}"
+          test -f "$dll_path"
+          zip -j "$zip_path" "$dll_path"
+          test "$(unzip -Z1 "$zip_path" | wc -l)" -eq 1
+          test "$(unzip -Z1 "$zip_path")" = "$PLUGIN_DLL"
+          echo "zip_path=$zip_path" >> "$GITHUB_OUTPUT"
+          echo "zip_name=$(basename "$zip_path")" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate release checksums
+        id: checksum
+        run: |
+          zip_path="${{ steps.package.outputs.zip_path }}"
+          md5sum "$zip_path" | awk '{print $1}' > "$zip_path.md5"
+          sha256sum "$zip_path" > "$zip_path.sha256"
+          echo "md5=$(cat "$zip_path.md5")" >> "$GITHUB_OUTPUT"
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            ${{ steps.package.outputs.zip_path }}
+            ${{ steps.package.outputs.zip_path }}.sha256
+
+      - name: Read generated release notes safely
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          delimiter="EOF_$(date +%s%N)"
+          {
+            echo "CHANGELOG_RAW<<$delimiter"
+            gh release view "$TAG" --json body --jq .body
+            echo "$delimiter"
+          } >> "$GITHUB_ENV"
+
+      - name: Check out default branch for manifest update
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          token: ${{ github.token }}
+
+      - name: Update manifest with the published asset
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          CHECKSUM: ${{ steps.checksum.outputs.md5 }}
+        run: |
+          source_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/alpha-jump_${VERSION}.zip"
+          timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          jq --arg version "$VERSION" \
+             --arg changelog "$CHANGELOG_RAW" \
+             --arg targetAbi "$TARGET_ABI" \
+             --arg sourceUrl "$source_url" \
+             --arg checksum "$CHECKSUM" \
+             --arg timestamp "$timestamp" '
+            def version_key:
+              (.version | split(".") | map(tonumber));
+            .[0].versions = (
+              ((.[0].versions | map(select(.version != $version))) +
+               [{ version: $version, changelog: $changelog, targetAbi: $targetAbi,
+                  sourceUrl: $sourceUrl, checksum: $checksum, timestamp: $timestamp }])
+              | sort_by(version_key)
+              | reverse
+            )
+          ' manifest.json > manifest.json.tmp
+          mv manifest.json.tmp manifest.json
+          jq empty manifest.json
+
+      - name: Commit manifest update
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git diff --staged --quiet || git commit -m "chore: update manifest for v${VERSION}"
+          git push origin "HEAD:${{ github.event.repository.default_branch }}"

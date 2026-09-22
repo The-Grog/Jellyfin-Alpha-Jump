@@ -1,21 +1,81 @@
-# Jellyfin Alpha Jump
+# Alpha Jump for Jellyfin
 
-Experimental Jellyfin Web v12.1 enhancement for Movies and Shows. The same browser source can be used standalone or embedded by the included Jellyfin 12.1 server-plugin project. It changes a supported alphabet-picker click from native letter filtering into a scroll to the first rendered card whose `data-prefix` starts with that letter.
+Alpha Jump is an installable Jellyfin 12 plugin for Jellyfin Web. In supported
+Movies and Shows libraries, it changes the native alphabet picker from letter
+filtering into a direct scroll to the first matching rendered title—while
+retaining the complete rendered library.
 
-This is not a server plugin, custom renderer, item fetcher, virtualizer, or continuously loading view. Jellyfin still fetches and renders the library; Alpha Jump only observes the rendered library page and scrolls it.
+It preserves Jellyfin's renderer, appearance, playback, cards, and normal
+controls. Alpha Jump does not fetch items independently or replace the library
+view. When its safety conditions are not met, the native alphabet picker keeps
+its normal filtering behavior.
 
-**If JellyTweaks is installed, its default library page-size override must also be zero (or disabled). The user confirmed its configured value of 100 was restoring pagination on reload; changing that override resolved the conflict.**
+## What Alpha Jump does
 
-## Required setup
+- Supports modern Jellyfin Web **Movies** and **Shows** main library tabs.
+- Scrolls to the first card whose rendered `data-prefix` begins with the chosen
+  alphabet letter instead of applying Jellyfin's alphabet filter.
+- Keeps non-alphabet filters and search constraints intact.
+- Clears its own selected state and returns to the top for `#` or a second click
+  on the selected letter.
 
-When enabled, Alpha Jump automatically configures the signed-in Jellyfin user's
-**Library page size** to `0` for this browser origin. This is an intentional
-product default, not a server setting: it affects that user's library views in
-this browser, not Movies alone, and can make large libraries slower or less
-stable. The script preserves the prior value once per user/origin, then uses one
-guarded page reload so Jellyfin can apply the setting. A console-injected copy
-is removed by that reload and must be pasted again; an Injector entry loads
-again normally.
+## Requirements
+
+Alpha Jump targets Jellyfin **12.x**, with behavior developed against Jellyfin
+Web 12.1. It needs Grid view, ascending Name/SortName, and a persisted
+`StartIndex` of zero in the supported Movies or Shows main tab.
+
+The plugin configures the signed-in user's browser-local **Library page size**
+to `0` when that option is enabled. Jellyfin treats zero as unpaginated mode,
+which means the browser loads the complete constrained library. This can have
+significant browser and performance implications for large libraries.
+
+If JellyTweaks controls Library Page Size, configure it to `0` or disable that
+override. A conflicting JellyTweaks page size can undo Alpha Jump's pagination
+setup after reload.
+
+## Installation
+
+### Recommended: Jellyfin plugin repository
+
+1. In Jellyfin, open **Dashboard** → **Plugins** → **Repositories** (or
+   **Manage Repositories**).
+2. Add a repository named `The-Grog Plugins` or `Alpha Jump`.
+3. Use this URL:
+
+   `https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/manifest.json`
+
+4. Open the **Catalog**, install **Alpha Jump**, and restart Jellyfin if it asks.
+5. Open Alpha Jump's plugin settings and configure the supported libraries and
+   options.
+
+The manifest intentionally has no placeholder release. The Catalog entry will
+appear after the first real tagged release publishes its ZIP and checksum.
+
+### Manual test installation
+
+Download `alpha-jump_<VERSION>.zip` from the GitHub Releases page, extract it
+into a new Alpha Jump directory beneath Jellyfin's plugins directory, and
+restart Jellyfin. The ZIP intentionally contains only
+`Jellyfin.Plugin.AlphaJump.dll`; it does not include Jellyfin runtime DLLs.
+Repository installation is preferred because it supports updates.
+
+## Configuration
+
+The Alpha Jump settings page provides:
+
+- **Enable Alpha Jump** — global injection switch.
+- **Enable newly discovered Movies and Shows libraries** — applied once when a
+  supported library is first discovered; it does not rewrite saved selections.
+- Per-library enablement for Movies and Shows. Unsupported libraries are shown
+  disabled with an explanation.
+- **Set the active browser user's library page size to zero** — browser-local
+  unpaginated setup; enabled by default.
+- **Smooth scroll** and **Enable browser debug logging**.
+
+Library choices use stable Jellyfin library IDs, so they survive a rename.
+
+## Safety conditions
 
 The enhancement itself is intentionally inert unless all of these are true:
 
@@ -31,7 +91,7 @@ requires the exact toolbar/card match above. That includes small libraries and
 filtered results of 100 or fewer; mismatched or pending results retain native
 behavior.
 
-At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why this prototype refuses a missing or nonzero persisted index. The active preference key is `<signed-in-user-id>-libraryPageSize`, not the old unprefixed assumption. The code uses that key only to configure the preference; it never treats it as evidence that a current result has rendered.
+At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why Alpha Jump refuses a missing or nonzero persisted index. The active preference key is `<signed-in-user-id>-libraryPageSize`, not the old unprefixed assumption. The code uses that key only to configure the preference; it never treats it as evidence that a current result has rendered.
 
 ## Behavior
 
@@ -45,7 +105,7 @@ At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`
 
 Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 
-## Local checks
+## Development and validation
 
 ```powershell
 node --check src/alpha-jump.js
@@ -57,7 +117,20 @@ git diff --check
 
 The tests are focused deterministic regressions, not a browser compatibility or performance result. See [docs/testing.md](docs/testing.md) for actual results and browser work still required.
 
-## Server-plugin prototype
+## Maintainer release flow
+
+Release versions come from four-part Git tags. A tag such as `v0.1.0.0`
+automatically runs validation, builds the DLL with version `0.1.0.0`, creates
+`alpha-jump_0.1.0.0.zip`, calculates its MD5 and SHA-256, creates the GitHub
+Release, and commits the real release URL/checksum to `manifest.json` on `main`.
+
+The workflows are [CI](.github/workflows/ci.yml) and
+[release](.github/workflows/release.yml). The release ZIP contains only the
+plugin DLL because the configuration page and browser source are embedded and
+Jellyfin supplies the runtime assemblies. A manifest-update commit cannot start
+another release because releases trigger only from matching version tags.
+
+## Plugin implementation notes
 
 The project at [plugin/Jellyfin.Plugin.AlphaJump](plugin/Jellyfin.Plugin.AlphaJump) targets the Jellyfin 12.1 plugin ABI (`net10.0`, `Jellyfin.Controller` and `Jellyfin.Model` `12.1.0`). It embeds [src/alpha-jump.js](src/alpha-jump.js) directly at build time; there is no plugin-maintained copy of the browser source.
 
@@ -72,13 +145,13 @@ The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin
 
 The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
 
-On 2026-09-21 this host built the production project with .NET SDK `10.0.401` (zero warnings) and ran the C# suite successfully (9 passed). The build output is local and ignored by Git; no plugin was installed, packaged, committed, pushed, or published. Served Jellyfin validation still requires a separately approved disposable-server test.
+On 2026-09-21 this host built the production project with .NET SDK `10.0.401` (zero warnings) and ran the C# suite successfully (9 passed). Served Jellyfin validation still requires a separately approved disposable-server test.
 
-To disable a future installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients; the current in-memory script can also be removed with `destroy()`. Before removing a future plugin, disable its injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test a future plugin while a JavaScript Injector Alpha Jump entry is still active. JellyTweaks can overwrite the same client page-size setting, so it must be disabled or set to zero for the unpaginated gate to arm. Music, books, photos, mixed libraries, and all native clients remain outside this initial plugin's support; no distribution manifest or release artifact exists yet.
+To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Music, books, photos, mixed libraries, and all native clients remain outside this initial support scope.
 
-## Temporary console trial only
+## Development and troubleshooting: temporary console trial
 
-Do not enable this in JavaScript Injector yet. In an authorized, non-production test session with page size zero, paste the contents of [src/alpha-jump.js](src/alpha-jump.js) into DevTools and run:
+For development-only diagnosis, an authorized non-production browser session can paste [src/alpha-jump.js](src/alpha-jump.js) into DevTools and run:
 
 ```js
 window.__alphaJumpPrototypeV1.config.debug = true;
@@ -133,7 +206,8 @@ The target browser still has to validate served-DOM selectors, keyboard/capture 
 - Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including non-Movies library views. Its performance on the target roughly 1,500-title library is **not yet tested**.
 - Source inspection supports the selectors and readiness model, but a served page must still prove event interception, request parameters, loading behavior, sticky-header positioning, and Jellyfin Enhanced coexistence.
 - Sort-name/card-prefix collation for custom titles, punctuation, accents, and non-Latin titles is not claimed beyond the literal prefix values the page renders.
-- This source has not been installed, packaged, committed, pushed, or published by this rework.
+- A controlled served-server installation and full browser compatibility test
+  are still required before claiming broad compatibility.
 
 The previous sequential native-page scan is retained as historical evidence in [docs/architecture.md](docs/architecture.md); it is not the current design.
 

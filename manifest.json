@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "4dd1ed79-9e5e-441e-8ca3-8f1b29601a48",
+    "name": "Alpha Jump",
+    "description": "Changes the Jellyfin Web alphabet picker into a direct scroll to matching Movies and Shows without filtering the rendered library.",
+    "overview": "Plex-style alphabet jumping for supported Jellyfin Web Movies and Shows libraries without native alphabet filtering.",
+    "owner": "The-Grog",
+    "category": "General",
+    "versions": []
+  }
+]

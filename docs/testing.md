@@ -105,6 +105,18 @@ Not performed: loading the plugin in Jellyfin, confirming its `IStartupFilter` o
 
 The C# XML/configuration regression also asserts that a globally disabled configuration reports a saved library selection independently of runtime enablement. The administrator mapper uses that saved state, so a global-disable save/re-enable cycle does not convert existing enabled rows to disabled selections. This remains test-host evidence; the served dashboard workflow is still unperformed.
 
+## Distribution infrastructure — 2026-09-22
+
+Static distribution checks were completed without creating a tag, GitHub Release, manifest version entry, plugin installation, or server restart:
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Repository manifest | Passed | Root `manifest.json` parsed with Node. It is a Jellyfin manifest array containing Alpha Jump metadata and an intentionally empty `versions` list; no placeholder URL or checksum was created. |
+| Workflow syntax and Actions rules | Passed | Official `actionlint` 1.7.12 was downloaded to a temporary directory, verified against its published SHA-256, and passed for `.github/workflows/ci.yml` and `.github/workflows/release.yml`. |
+| Packaging design | Reviewed | Release builds package only `plugin/Jellyfin.Plugin.AlphaJump/bin/Release/net10.0/Jellyfin.Plugin.AlphaJump.dll`. Current Release output contains that DLL plus `.deps.json`, `.pdb`, and `.xml`; the workflow's `unzip -Z1` assertions reject anything except the DLL. `Jellyfin.Controller` and `Jellyfin.Model` are runtime-excluded in the production project, and the test project is never a package input. |
+
+The release workflow has `contents: write` only. It uses the built-in `GITHUB_TOKEN` to create/upload the release and update the default branch manifest. If branch protection blocks GitHub Actions from pushing to `main`, a maintainer must permit that narrowly scoped bot push or adjust the workflow to open a pull request; no personal token is embedded.
+
 ### Exact first controlled plugin test
 
 1. Use a server test copy and browser profile; do not use the production server first.
