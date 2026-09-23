@@ -42,7 +42,10 @@
         pluginApiRetryDelayMs: 250,
         updateCheckThrottleMs: 10000,
         updateRequestTimeoutMs: 5000,
-        updateRetryDelaysMs: [1000, 3000, 8000]
+        updateRetryDelaysMs: [1000, 3000, 8000],
+        // Server shutdown can leave the old runtime answering briefly. Keep a
+        // deliberately short, bounded handoff window after its restart events.
+        updateRestartWindowMs: 30000
     };
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
@@ -82,7 +85,7 @@
             failedLibraries: new Set(),
             readinessRetry: null,
             readinessFailureReported: new Set(),
-            update: { initial: null, pending: null, request: null, retry: null, retries: 0, lastCheck: 0, notice: null, unsubscribe: null, focus: null, visibility: null }
+            update: { initial: null, pending: null, request: null, retry: null, retries: 0, lastCheck: 0, restartUntil: 0, generation: 0, client: null, notice: null, unsubscribe: null, focus: null, visibility: null }
         }
     };
 
@@ -117,6 +120,7 @@
 
     function updateNotice(message) {
         const update = state.plugin.update;
+        if (state.destroyed) return;
         if (!update.notice?.isConnected) {
             const notice = doc.createElement('div');
             notice.className = 'alpha-jump-update-notice';
@@ -148,7 +152,7 @@
 
     function applyPendingUpdate() {
         const update = state.plugin.update;
-        if (!update.pending) return;
+        if (state.destroyed || !update.pending) return;
         if (!updateSafeToReload()) { updateNotice('Alpha Jump updated—refresh to apply.'); return; }
         const key = updateReloadKey(update.pending.fingerprint);
         try {
@@ -158,30 +162,112 @@
         } catch { updateNotice('Alpha Jump updated—refresh to apply.'); }
     }
 
-    function scheduleUpdateRetry() {
+    function restartRecoveryActive() {
+        return Date.now() < state.plugin.update.restartUntil;
+    }
+
+    function scheduleRestartRecovery() {
         const update = state.plugin.update;
-        if (state.destroyed || update.retry || update.retries >= CONFIG.updateRetryDelaysMs.length) return;
-        const delay = CONFIG.updateRetryDelaysMs[update.retries++];
-        update.retry = root.setTimeout(() => { update.retry = null; checkForPluginUpdate(true); }, delay);
+        if (state.destroyed || update.retry || !restartRecoveryActive()) return;
+        // The final delay repeats only until the finite restart window ends.
+        const delay = CONFIG.updateRetryDelaysMs[Math.min(update.retries++, CONFIG.updateRetryDelaysMs.length - 1)];
+        const remaining = update.restartUntil - Date.now();
+        if (remaining <= 0) return;
+        update.retry = root.setTimeout(() => { update.retry = null; checkForPluginUpdate(true); }, Math.min(delay, remaining));
+    }
+
+    function beginRestartRecovery() {
+        const update = state.plugin.update;
+        if (state.destroyed || !update.initial) return;
+        update.restartUntil = Math.max(update.restartUntil, Date.now() + CONFIG.updateRestartWindowMs);
+        update.retries = 0;
+        scheduleRestartRecovery();
+    }
+
+    function updateRequestIsCurrent(request) {
+        const update = state.plugin.update;
+        return !state.destroyed && update.request === request && update.generation === request.generation && !request.cancelled;
+    }
+
+    function cancelUpdateRequest(request) {
+        if (!request) return;
+        request.cancelled = true;
+        if (request.timeout) root.clearTimeout(request.timeout);
+        // Jellyfin's ajax implementation can expose an abortable jqXHR. Do not
+        // assume every promise is abortable; an unabortable request stays marked
+        // outstanding until it settles so a timeout cannot create overlap.
+        if (typeof request.transport?.abort === 'function') {
+            let aborted = false;
+            try { request.transport.abort(); aborted = true; } catch { /* cancellation is best effort */ }
+            if (aborted && state.plugin.update.request === request) state.plugin.update.request = null;
+        }
     }
 
     function checkForPluginUpdate(force = false) {
         const update = state.plugin.update;
         if (!pluginMode() || !update.initial || update.request || (!force && Date.now() - update.lastCheck < CONFIG.updateCheckThrottleMs)) return;
         const client = root.ApiClient;
-        if (!pluginClientIsReady(client)) { scheduleUpdateRetry(); return; }
+        ensureUpdateSubscription();
+        if (!pluginClientIsReady(client)) { scheduleRestartRecovery(); return; }
         update.lastCheck = Date.now();
-        let timeout;
-        const request = Promise.race([
-            client.ajax({ type: 'GET', url: update.initial.url, dataType: 'json', timeout: CONFIG.updateRequestTimeoutMs }),
-            new Promise((_, reject) => { timeout = root.setTimeout(() => reject(new Error('runtime request timeout')), CONFIG.updateRequestTimeoutMs); })
-        ]).then(payload => {
+        const request = { generation: update.generation, transport: null, timeout: null, cancelled: false, timedOut: false };
+        update.request = request;
+        try {
+            request.transport = client.ajax({ type: 'GET', url: update.initial.url, dataType: 'json', timeout: CONFIG.updateRequestTimeoutMs });
+        } catch {
+            if (updateRequestIsCurrent(request)) {
+                update.request = null;
+                scheduleRestartRecovery();
+            }
+            return;
+        }
+        request.timeout = root.setTimeout(() => {
+            if (!updateRequestIsCurrent(request)) return;
+            request.timedOut = true;
+            if (typeof request.transport?.abort === 'function') {
+                cancelUpdateRequest(request);
+                scheduleRestartRecovery();
+            }
+            // Unabortable requests intentionally remain outstanding. Their late
+            // completion is ignored after destroy and cannot race a second fetch.
+        }, CONFIG.updateRequestTimeoutMs);
+        Promise.resolve(request.transport).then(payload => {
+            if (!updateRequestIsCurrent(request)) return;
             const runtime = validRuntime(payload);
             if (!runtime) throw new Error('invalid runtime response');
             update.retries = 0;
+            const runtimeChanged = runtime.runtimeId !== update.initial.runtimeId;
+            if (runtimeChanged) update.restartUntil = 0;
             if (runtime.fingerprint !== update.initial.fingerprint) { update.pending = runtime; applyPendingUpdate(); }
-        }).catch(() => scheduleUpdateRetry()).finally(() => { if (timeout) root.clearTimeout(timeout); if (update.request === request) update.request = null; });
-        update.request = request;
+            // A responsive old server is expected during shutdown. Do not treat
+            // it as completion of a restart handoff.
+            if (!runtimeChanged && restartRecoveryActive()) scheduleRestartRecovery();
+        }).catch(() => {
+            if (updateRequestIsCurrent(request)) scheduleRestartRecovery();
+        }).finally(() => {
+            if (request.timeout) root.clearTimeout(request.timeout);
+            if (update.request === request) update.request = null;
+        });
+    }
+
+    function clearUpdateSubscription() {
+        const update = state.plugin.update;
+        try { update.unsubscribe?.(); } catch { /* a replaced client must not break native behavior */ }
+        update.unsubscribe = null;
+        update.client = null;
+    }
+
+    function ensureUpdateSubscription() {
+        const update = state.plugin.update;
+        if (state.destroyed || !update.initial) return;
+        const client = root.ApiClient;
+        if (client !== update.client) clearUpdateSubscription();
+        if (!pluginClientIsReady(client) || typeof client.subscribe !== 'function') return;
+        if (update.unsubscribe && update.client === client) return;
+        try {
+            update.unsubscribe = client.subscribe(['ServerRestarting', 'ServerShuttingDown'], beginRestartRecovery);
+            update.client = client;
+        } catch { clearUpdateSubscription(); /* focus/visibility recovery remains available */ }
     }
 
     function startUpdateRecovery() {
@@ -189,21 +275,21 @@
         if (!marker?.runtime) return;
         const update = state.plugin.update;
         update.initial = marker.runtime;
-        update.focus = () => { checkForPluginUpdate(false); applyPendingUpdate(); };
+        update.focus = () => { ensureUpdateSubscription(); checkForPluginUpdate(false); applyPendingUpdate(); };
         update.visibility = () => { if (doc.visibilityState === 'visible') update.focus(); };
         root.addEventListener('focus', update.focus);
         doc.addEventListener('visibilitychange', update.visibility);
-        const client = root.ApiClient;
-        if (pluginClientIsReady(client) && typeof client.subscribe === 'function') {
-            try { update.unsubscribe = client.subscribe(['ServerRestarting', 'ServerShuttingDown'], () => scheduleUpdateRetry()); } catch { /* focus recovery remains available */ }
-        }
+        ensureUpdateSubscription();
     }
 
     function stopUpdateRecovery() {
         const update = state.plugin.update;
+        update.generation += 1;
         if (update.retry) root.clearTimeout(update.retry);
-        update.unsubscribe?.(); root.removeEventListener('focus', update.focus); doc.removeEventListener('visibilitychange', update.visibility);
-        update.notice?.remove(); update.retry = update.request = update.notice = update.unsubscribe = update.focus = update.visibility = null;
+        cancelUpdateRequest(update.request);
+        clearUpdateSubscription(); root.removeEventListener('focus', update.focus); doc.removeEventListener('visibilitychange', update.visibility);
+        update.notice?.remove(); update.retry = update.request = update.notice = update.focus = update.visibility = null;
+        update.restartUntil = 0;
     }
 
     function pluginValue(payload, name) {
@@ -1052,6 +1138,9 @@
 
     function refreshSurface() {
         if (state.destroyed) return;
+        // ApiClient can appear after the injected script and before the first
+        // library render. This is also where SPA client replacement is noticed.
+        ensureUpdateSubscription();
         const route = routeInfo();
         const normalizedRouteLibraryId = normalizeLibraryId(route.parentId);
         if (state.plugin.readinessRetry && state.plugin.readinessRetry.libraryId !== normalizedRouteLibraryId) {

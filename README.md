@@ -94,6 +94,16 @@ expose that verified API receive the accessible **Alpha Jump updated—refresh t
 apply** action instead. This intentionally avoids interrupting playback or
 dashboard editing.
 
+Restart notifications begin a single bounded recovery window. A response from
+the old server during shutdown is not treated as a completed update check: the
+tab continues its finite backoff checks until a new runtime answers or the
+window expires. A delayed or replaced authenticated `ApiClient` is subscribed
+when it becomes available, while focus and visibility remain fallbacks. Teardown
+and reinjection cancel abortable runtime requests, invalidate all late
+callbacks, remove the notice/listeners, and never let an old response reload a
+new instance. An unabortable timeout remains outstanding until it settles, so
+it cannot overlap a second request.
+
 ## Safety conditions
 
 The enhancement itself is intentionally inert unless all of these are true:
@@ -148,6 +158,10 @@ The workflows are [CI](.github/workflows/ci.yml) and
 plugin DLL because the configuration page and browser source are embedded and
 Jellyfin supplies the runtime assemblies. A manifest-update commit cannot start
 another release because releases trigger only from matching version tags.
+Release compatibility metadata is derived from the pinned Jellyfin
+Controller/Model package version. The current supported minimum is Jellyfin
+12.1 (`targetAbi` `12.1.0.0`); CI and the release workflow validate that this
+stays aligned with the manifest.
 
 ## Plugin implementation notes
 

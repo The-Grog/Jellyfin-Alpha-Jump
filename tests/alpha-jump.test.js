@@ -91,7 +91,8 @@ function createHarness({
     pluginConfiguration = null,
     pluginConfigurationFailure = false,
     runtime = null,
-    playbackExposed = false
+    playbackExposed = false,
+    visibility = 'visible'
 } = {}) {
     const shows = library === 'series';
     const pageId = shows ? 'tvshowsPage' : 'moviesPage';
@@ -133,11 +134,13 @@ function createHarness({
     page.childrenBySelector.set('.noItemsMessage.centerMessage', []);
 
     const documentListeners = new Map();
+    const windowListeners = new Map();
     const body = new FakeElement();
     const head = new FakeElement();
     const document = {
         body,
         head,
+        visibilityState: visibility,
         querySelectorAll: selector => {
             if (selector === '#' + pageId) return [page];
             if (selector === '.MuiToolbar-root') return [toolbar];
@@ -169,13 +172,26 @@ function createHarness({
     let activeUserId = userId;
     let isLoggedIn = loggedIn;
     let isApiAvailable = apiAvailable;
-    const apiClient = {
+    const subscriptions = [];
+    let runtimeCalls = 0;
+    const nextRuntimeResponse = () => {
+        runtimeCalls += 1;
+        const value = runtime?.responses?.length ? runtime.responses.shift() : runtime?.response;
+        return typeof value === 'function' ? value() : value;
+    };
+    const makeApiClient = () => ({
         getCurrentUserId: () => activeUserId,
         isLoggedIn: () => isLoggedIn,
         ajax: options => pluginConfigurationFailure
             ? Promise.reject(new Error('server unavailable'))
-            : Promise.resolve(options.url === '/AlphaJump/runtime' ? runtime?.response : pluginConfiguration)
-    };
+            : Promise.resolve(options.url === '/AlphaJump/runtime' ? nextRuntimeResponse() : pluginConfiguration),
+        subscribe: (_events, callback) => {
+            const subscription = { callback, active: true };
+            subscriptions.push(subscription);
+            return () => { subscription.active = false; };
+        }
+    });
+    let apiClient = makeApiClient();
     const root = {
         document,
         playbackManager: playbackExposed ? { isPlayingLocally: () => false } : undefined,
@@ -206,8 +222,8 @@ function createHarness({
         cancelAnimationFrame() {},
         setTimeout,
         clearTimeout,
-        addEventListener() {},
-        removeEventListener() {},
+        addEventListener(type, callback) { windowListeners.set(type, callback); },
+        removeEventListener(type, callback) { if (windowListeners.get(type) === callback) windowListeners.delete(type); },
         MutationObserver: class {
             constructor(callback) {
                 this.callback = callback;
@@ -278,11 +294,17 @@ function createHarness({
         setUser: value => { activeUserId = value; },
         setLoggedIn: value => { isLoggedIn = value; },
         setApiAvailable: value => { isApiAvailable = value; },
+        replaceApiClient: () => { apiClient = makeApiClient(); },
+        emitRestart: () => subscriptions.filter(subscription => subscription.active).forEach(subscription => subscription.callback()),
+        get activeSubscriptions() { return subscriptions.filter(subscription => subscription.active).length; },
+        setVisibility: value => { document.visibilityState = value; documentListeners.get('visibilitychange')?.(); },
+        get runtimeCalls() { return runtimeCalls; },
         get reloads() { return reloads; }
     };
 }
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
+const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
 function assertNoPersistentAlphaJumpMarker(harness) {
     harness.buttons.forEach(button => {
@@ -720,6 +742,90 @@ test('plugin runtime recovery ignores unchanged code and reloads a safe changed 
     reinjected.test.checkForPluginUpdate(true); await turn();
     assert.equal(h.reloads, 1);
     reinjected.api.destroy();
+});
+
+test('a runtime response resolving after destroy or reinjection cannot show an update notice or reload', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    let resolveOld;
+    const runtime = {
+        initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
+        response: new Promise(resolve => { resolveOld = resolve; })
+    };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, playbackExposed: true });
+    h.init(); await turn();
+    h.test.checkForPluginUpdate(true);
+    assert.equal(h.runtimeCalls, 1);
+    const replacement = createAlphaJump(h.root);
+    replacement.init();
+    resolveOld({ runtimeId: 'new', scriptFingerprint: 'b'.repeat(64), pluginVersion: '0.2.1.0' });
+    await turn(); await turn();
+    assert.equal(h.reloads, 0);
+    assert.equal(h.test.getState().plugin.update.notice, null);
+    replacement.api.destroy();
+});
+
+test('an unabortable runtime timeout remains outstanding instead of overlapping a second request', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    let resolveResponse;
+    const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: new Promise(resolve => { resolveResponse = resolve; }) };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime });
+    h.api.config.updateRequestTimeoutMs = 1;
+    h.init(); await turn();
+    h.test.checkForPluginUpdate(true); await pause(5);
+    h.test.checkForPluginUpdate(true);
+    assert.equal(h.runtimeCalls, 1);
+    resolveResponse({ runtimeId: 'old', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' });
+    await turn();
+    h.api.destroy();
+});
+
+for (const [label, fingerprint, expectedReloads] of [
+    ['unchanged script', 'a'.repeat(64), 0],
+    ['changed script', 'b'.repeat(64), 1]
+]) {
+    test('restart recovery continues past an old runtime response and applies a ' + label, async () => {
+        const routeLibraryId = '0123456789abcdef0123456789abcdef';
+        const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+        const runtime = {
+            initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
+            responses: [
+                { runtimeId: 'old', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' },
+                () => Promise.reject(new Error('server unavailable')),
+                { runtimeId: 'new', scriptFingerprint: fingerprint, pluginVersion: '0.2.1.0' }
+            ]
+        };
+        const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, playbackExposed: true });
+        h.api.config.updateRetryDelaysMs = [1, 1, 1];
+        h.init(); await turn();
+        assert.equal(h.activeSubscriptions, 1);
+        h.emitRestart(); h.emitRestart();
+        await pause(20);
+        assert.equal(h.runtimeCalls, 3);
+        assert.equal(h.reloads, expectedReloads);
+        assert.equal(h.test.getState().plugin.update.restartUntil, 0);
+        h.api.destroy();
+    });
+}
+
+test('delayed and replaced ApiClient instances subscribe once and clean up restart recovery', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'old', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, apiAvailable: false });
+    h.init(); await turn();
+    assert.equal(h.activeSubscriptions, 0);
+    h.setApiAvailable(true);
+    h.test.refreshSurface(); await turn();
+    assert.equal(h.activeSubscriptions, 1);
+    h.emitRestart();
+    assert.ok(h.test.getState().plugin.update.restartUntil > Date.now());
+    h.replaceApiClient();
+    h.test.refreshSurface();
+    assert.equal(h.activeSubscriptions, 1);
+    h.api.destroy();
+    assert.equal(h.activeSubscriptions, 0);
 });
 
 for (const library of ['movies', 'series']) {

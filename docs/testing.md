@@ -8,7 +8,7 @@ Browser/session: authorized Codex in-app browser (its Chromium version was not e
 
 The current code changes Alpha Jump from its earlier persistent-selection behavior to stateless, Plex-like commands: each `A`–`Z` activation repeats that letter's jump, no Alpha Jump marker or `aria-current` state remains, and only `#` returns to the beginning. The served-browser observations below predate this change and are retained as historical evidence only; **the new stateless behavior has not yet been run in a live browser**.
 
-Automated validation on 2026-09-22 passed `node --check src/alpha-jump.js` and **33/33** focused JavaScript tests. The added production-path checks cover repeated M clicks as independent intercepted jumps, `#` returning to top after a letter jump, absence of Alpha Jump marker/`aria-current` state across the picker, untouched native `aria-pressed`, latest-request-wins scrolling, query cancellation, detach feedback/listener cleanup, and runtime update recovery. `dotnet build` completed with 0 warnings/errors and `dotnet test` passed **11/11**. The added C# regressions supply 12.1 `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()`, verify valid Movies mapping and invalid-ID skips, throw if discovery reads `RootFolder`, and verify runtime fingerprint/script URL behavior. These are local deterministic results, not browser validation.
+Automated validation on 2026-09-22 passed `node --check src/alpha-jump.js` and **38/38** focused JavaScript tests. The added production-path checks cover repeated M clicks as independent intercepted jumps, `#` returning to top after a letter jump, absence of Alpha Jump marker/`aria-current` state across the picker, untouched native `aria-pressed`, latest-request-wins scrolling, query cancellation, detach feedback/listener cleanup, and runtime update recovery. `dotnet build` completed with 0 warnings/errors and `dotnet test` passed **11/11**. The added C# regressions supply 12.1 `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()`, verify valid Movies mapping and invalid-ID skips, throw if discovery reads `RootFolder`, and verify runtime fingerprint/script URL behavior. These are local deterministic results, not browser validation.
 
 ### Update-recovery implementation — 2026-09-22
 
@@ -21,6 +21,28 @@ does not poll continuously. Jellyfin Web v12.1 source uses a module-scoped
 playback manager, so this implementation defers to a manual accessible refresh
 notice unless a host exposes the verified `isPlayingLocally` API. No served
 server/browser update-recovery run has been performed.
+
+### Recovery lifecycle and release-metadata follow-up — 2026-09-22
+
+The browser production-path tests now additionally cover destruction and
+reinjection while an old runtime request is unresolved; the late response
+cannot create a notice, mutate the replacement, or reload. An unabortable
+request timeout remains owned until it settles, preventing concurrent runtime
+requests. Restart-event tests exercise the actual subscription callback and
+request path through old-runtime response, unavailable server, and new runtime
+for both unchanged and changed fingerprints. They also verify duplicate restart
+events create one loop, delayed `ApiClient` readiness subscribes later,
+replacement clients replace (rather than duplicate) the subscription, and
+destroy removes it. These are deterministic fake-client tests of the shipping
+functions; they do not establish a live Jellyfin restart.
+
+`node scripts/validate-release-abi.js` passed and derives `12.1.0.0` from the
+pinned `Jellyfin.Controller`/`Jellyfin.Model` `12.1.0` references. It checks
+the release workflow's generated `TARGET_ABI` and every existing manifest entry.
+The existing 0.2.0.0 and 0.2.1.0 tags both contain those 12.1.0 package
+references, so their manifest metadata was corrected from the unsupported
+12.0.0.0 claim without altering published URLs, checksums, versions,
+timestamps, or ZIP assets.
 
 ## Actually run
 

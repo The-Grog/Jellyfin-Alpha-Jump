@@ -10,7 +10,7 @@
       {
         "version": "0.2.1.0",
         "changelog": "**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.2.0.0...v0.2.1.0",
-        "targetAbi": "12.0.0.0",
+        "targetAbi": "12.1.0.0",
         "sourceUrl": "https://github.com/The-Grog/Jellyfin-Alpha-Jump/releases/download/v0.2.1.0/alpha-jump_0.2.1.0.zip",
         "checksum": "203d76d073329c8abb68fc02440fe0d0",
         "timestamp": "2026-09-22T16:40:10Z"
@@ -18,7 +18,7 @@
       {
         "version": "0.2.0.0",
         "changelog": "**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.1.0...v0.2.0.0",
-        "targetAbi": "12.0.0.0",
+        "targetAbi": "12.1.0.0",
         "sourceUrl": "https://github.com/The-Grog/Jellyfin-Alpha-Jump/releases/download/v0.2.0.0/alpha-jump_0.2.0.0.zip",
         "checksum": "6842c24555699a16fc58f88ab4bb9900",
         "timestamp": "2026-09-22T06:36:40Z"
