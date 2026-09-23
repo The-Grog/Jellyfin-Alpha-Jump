@@ -8,14 +8,15 @@ plugin DLL users install.
 - `main` requires a pull request, linear history, resolved review threads, and
   the `validate` CI job on the latest base branch. The required approval count
   is intentionally zero while the repository has one maintainer.
-- The repository owner may bypass these controls. The GitHub Actions integration
-  has a narrow `main` bypass because the release workflow commits the generated
-  checksum and URL to `manifest.json`; ordinary workflows have read-only token
-  permissions.
+- The repository owner may bypass these controls. GitHub does not permit the
+  GitHub Actions integration as a repository-ruleset bypass actor for this
+  personal repository, so workflows never push directly to `main`.
 - `v*` tags are protected from creation, update, deletion, and force updates;
   only the repository owner bypasses that rule.
-- The release workflow creates a draft with all assets, writes the manifest,
-  then publishes the draft. This order is compatible with immutable releases.
+- The release workflow creates a draft with all assets, then opens a manifest
+  pull request. The separate publish workflow releases that draft only after
+  the protected manifest PR is merged. This order is compatible with immutable
+  releases.
 
 ## Automation and disclosure
 

@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -158,18 +159,30 @@ jobs:
           mv manifest.json.tmp manifest.json
           jq empty manifest.json
 
-      - name: Commit manifest update
+      - name: Push manifest update branch and open pull request
         env:
           VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          branch="release-manifest/$TAG"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch"
+            git switch --track -C "$branch" "origin/$branch"
+          else
+            git switch -c "$branch"
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.json
-          git diff --staged --quiet || git commit -m "chore: update manifest for v${VERSION}"
-          git push origin "HEAD:${{ github.event.repository.default_branch }}"
-
-      - name: Publish immutable release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        run: gh release edit "$TAG" --draft=false
+          if git diff --staged --quiet; then
+            echo "Manifest already contains v${VERSION}; no pull request created."
+            exit 0
+          fi
+          git commit -m "chore: update manifest for v${VERSION}"
+          git push origin "HEAD:refs/heads/$branch"
+          if ! gh pr list --head "$branch" --base "${{ github.event.repository.default_branch }}" --state open --json url --jq '.[0].url' | grep -q .; then
+            gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \
+              --title "chore: update manifest for v${VERSION}" \
+              --body "Adds the checksum and release URL for $TAG. Merging this PR publishes the prepared immutable release."
+          fi
