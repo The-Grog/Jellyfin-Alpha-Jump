@@ -160,6 +160,14 @@ The workflows are [CI](.github/workflows/ci.yml) and
 plugin DLL because the configuration page and browser source are embedded and
 Jellyfin supplies the runtime assemblies. A manifest-update commit cannot start
 another release because releases trigger only from matching version tags.
+
+## Security
+
+Repository ownership is recorded in [.github/CODEOWNERS](.github/CODEOWNERS).
+CI, CodeQL, Dependabot, pinned workflow actions, and GitHub repository controls
+are maintained as supply-chain safeguards. See [SECURITY.md](SECURITY.md) for
+the private vulnerability-reporting process and [security controls](docs/security.md)
+for the maintainer policy.
 Release compatibility metadata is derived from the pinned Jellyfin
 Controller/Model package version. The current supported minimum is Jellyfin
 12.1 (`targetAbi` `12.1.0.0`); CI and the release workflow validate that this

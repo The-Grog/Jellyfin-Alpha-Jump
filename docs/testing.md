@@ -62,6 +62,16 @@ vulnerability-data endpoint was unavailable, not because package restore or
 compilation failed. No tag, release, installation, restart, or browser test was
 performed for this preparation.
 
+### Repository security hardening — 2026-09-22
+
+Before enabling immutable-release-compatible repository controls, local
+validation passed JavaScript syntax, **38/38** JavaScript tests, the ABI check,
+and **11/11** C# tests. The Release build completed with the same transient
+NuGet vulnerability-data `NU1900` warning recorded above. Workflow actions are
+now SHA pinned; CodeQL and Dependabot configuration are source-controlled.
+Ruleset, Actions, secret-scanning, vulnerability-reporting, and immutable
+release settings require GitHub-hosted verification after this change is pushed.
+
 ## Actually run
 
 | Check | Result | Evidence |
