@@ -33,7 +33,7 @@ jobs:
           node --check src/alpha-jump.js
           node --test tests/alpha-jump.test.js
           node scripts/validate-release-abi.js
-          node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync('manifest.json', 'utf8')); if (!Array.isArray(manifest) || manifest.length !== 1 || manifest[0].guid !== '4dd1ed79-9e5e-441e-8ca3-8f1b29601a48' || !Array.isArray(manifest[0].versions)) process.exit(1);"
+          node -e "const fs=require('fs'); const manifest=JSON.parse(fs.readFileSync('manifest.json', 'utf8')); const plugin=manifest[0]; if (!Array.isArray(manifest) || manifest.length !== 1 || plugin?.guid !== '4dd1ed79-9e5e-441e-8ca3-8f1b29601a48' || !Array.isArray(plugin.versions) || plugin.imageUrl !== 'https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/docs/images/alpha-jump-icon.png' || !fs.existsSync('docs/images/alpha-jump-icon.png')) process.exit(1);"
 
       - name: Restore .NET dependencies
         run: dotnet restore plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj

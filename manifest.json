@@ -6,6 +6,7 @@
     "overview": "Plex-style alphabet jumping for supported Jellyfin Web Movies and Shows libraries without native alphabet filtering.",
     "owner": "The-Grog",
     "category": "General",
+    "imageUrl": "https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/docs/images/alpha-jump-icon.png",
     "versions": [
       {
         "version": "0.3.0.0",

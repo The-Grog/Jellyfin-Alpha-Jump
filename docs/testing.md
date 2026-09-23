@@ -10,6 +10,8 @@ The current code changes Alpha Jump from its earlier persistent-selection behavi
 
 Automated validation on 2026-09-22 passed `node --check src/alpha-jump.js` and **38/38** focused JavaScript tests. The added production-path checks cover repeated M clicks as independent intercepted jumps, `#` returning to top after a letter jump, absence of Alpha Jump marker/`aria-current` state across the picker, untouched native `aria-pressed`, latest-request-wins scrolling, query cancellation, detach feedback/listener cleanup, and runtime update recovery. `dotnet build` completed with 0 warnings/errors and `dotnet test` passed **11/11**. The added C# regressions supply 12.1 `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()`, verify valid Movies mapping and invalid-ID skips, throw if discovery reads `RootFolder`, and verify runtime fingerprint/script URL behavior. These are local deterministic results, not browser validation.
 
+The repository `global.json` explicitly selects `Microsoft.Testing.Platform` for .NET 10 `dotnet test`. This is required because the test project's MTP v2 dependency no longer supports the SDK's legacy VSTest target. On 2026-09-22, the CI-equivalent `dotnet test ... --configuration Release --no-build --no-restore` command passed **11/11** locally with .NET SDK `10.0.401`. The preceding local build emitted two `NU1900` warnings only because this environment could not reach NuGet's vulnerability-data service; it produced no build errors.
+
 ### Update-recovery implementation — 2026-09-22
 
 The plugin now exposes a no-store runtime identity containing a per-process ID,
