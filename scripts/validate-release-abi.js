@@ -1,7 +1,7 @@
 /*
- * Keep the published catalog requirement aligned with the pinned Jellyfin
- * controller/model packages. This validates metadata only; it never changes
- * release assets or a manifest entry's URL, checksum, version, or timestamp.
+ * Keep the next release's catalog requirement aligned with the pinned Jellyfin
+ * controller/model packages. Historical manifest entries intentionally are not
+ * compared here: each must retain the ABI of the release that produced it.
  */
 const fs = require('node:fs');
 
@@ -19,12 +19,4 @@ const release = fs.readFileSync('.github/workflows/release.yml', 'utf8');
 if (!new RegExp(`TARGET_ABI:\\s*${targetAbi.replaceAll('.', '\\.')}`).test(release)) {
     throw new Error(`Release workflow TARGET_ABI must be ${targetAbi}.`);
 }
-const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
-for (const plugin of manifest) {
-    for (const releaseEntry of plugin.versions || []) {
-        if (releaseEntry.targetAbi !== targetAbi) {
-            throw new Error(`Manifest ${releaseEntry.version} targetAbi must be ${targetAbi}.`);
-        }
-    }
-}
-console.log(`Release ABI metadata matches Jellyfin packages: ${targetAbi}`);
+console.log(`Next-release ABI metadata matches Jellyfin packages: ${targetAbi}`);

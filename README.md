@@ -30,9 +30,9 @@ to `0` when that option is enabled. Jellyfin treats zero as unpaginated mode,
 which means the browser loads the complete constrained library. This can have
 significant browser and performance implications for large libraries.
 
-If JellyTweaks controls Library Page Size, configure it to `0` or disable that
-override. A conflicting JellyTweaks page size can undo Alpha Jump's pagination
-setup after reload.
+If JellyTweaks controls Library Page Size, set its Library Page Size to `0` or
+disable JellyTweaks/all tweaks. A conflicting JellyTweaks page size can undo
+Alpha Jump's pagination setup after reload.
 
 ## Installation
 
@@ -73,19 +73,21 @@ The Alpha Jump settings page provides:
   unpaginated setup; enabled by default.
 - **Smooth scroll** and **Enable browser debug logging**.
 
-If JellyTweaks is installed and controls Library Page Size, set its override to
-`0` as well (or disable that override). Otherwise JellyTweaks can restore a
-nonzero page size after Alpha Jump reloads.
+If JellyTweaks is installed and controls Library Page Size, set its Library
+Page Size to `0` as well (or disable JellyTweaks/all tweaks). Otherwise
+JellyTweaks can restore a nonzero page size after Alpha Jump reloads.
 
 Library choices use stable Jellyfin library IDs, so they survive a rename.
 
 ## Update recovery
 
-The first installation still needs a manual browser refresh, and the first
-upgrade that adds this recovery mechanism needs one too. Later upgrades with a
-changed Alpha Jump script use a fingerprinted script URL and can prompt an
-already-open tab to refresh after Jellyfin restarts. An unchanged script after
-an ordinary restart does not request a refresh.
+The first installation still needs a manual browser refresh. The first upgrade
+that introduces this mechanism—specifically `0.2.1.0` to `0.3.0.0`—also needs
+one because the already-open 0.2.1.0 script cannot check for an update. Once a
+tab has loaded 0.3.0.0 or later, later changed-script upgrades use a
+fingerprinted script URL and can prompt that tab to refresh after Jellyfin
+restarts. An unchanged script after an ordinary restart does not request a
+refresh.
 
 Alpha Jump reloads automatically only when it can positively establish a
 visible supported library screen and inactive playback. Jellyfin Web 12.1 keeps
@@ -148,9 +150,9 @@ The tests are focused deterministic regressions, not a browser compatibility or 
 
 ## Maintainer release flow
 
-Release versions come from four-part Git tags. A tag such as `v0.1.0.0`
-automatically runs validation, builds the DLL with version `0.1.0.0`, creates
-`alpha-jump_0.1.0.0.zip`, calculates its MD5 and SHA-256, creates the GitHub
+Release versions come from four-part Git tags. A tag such as `v0.3.0.0`
+automatically runs validation, builds the DLL with version `0.3.0.0`, creates
+`alpha-jump_0.3.0.0.zip`, calculates its MD5 and SHA-256, creates the GitHub
 Release, and commits the real release URL/checksum to `manifest.json` on `main`.
 
 The workflows are [CI](.github/workflows/ci.yml) and

@@ -38,11 +38,29 @@ functions; they do not establish a live Jellyfin restart.
 
 `node scripts/validate-release-abi.js` passed and derives `12.1.0.0` from the
 pinned `Jellyfin.Controller`/`Jellyfin.Model` `12.1.0` references. It checks
-the release workflow's generated `TARGET_ABI` and every existing manifest entry.
-The existing 0.2.0.0 and 0.2.1.0 tags both contain those 12.1.0 package
-references, so their manifest metadata was corrected from the unsupported
-12.0.0.0 claim without altering published URLs, checksums, versions,
-timestamps, or ZIP assets.
+only the current release workflow's generated `TARGET_ABI`; it deliberately
+does not compare or rewrite historical manifest entries, which must retain the
+ABI each published release was built for. The existing 0.2.0.0 and 0.2.1.0 tags
+both contain those 12.1.0 package references, so their manifest metadata was
+corrected from the unsupported 12.0.0.0 claim without altering published URLs,
+checksums, versions, timestamps, or ZIP assets.
+
+### 0.3.0.0 release preparation — 2026-09-22
+
+The local development assembly version is now `0.3.0.0`; the release workflow
+continues to override it from the four-part Git tag. Documentation now states
+that JellyTweaks must be set to Library Page Size `0`, or JellyTweaks/all tweaks
+must be disabled—there is no per-setting unmanaged state. It also states the
+first-upgrade boundary explicitly: an already-open 0.2.1.0 tab needs one manual
+browser refresh after the 0.3.0.0 server restart before later update recovery
+can work. Stock Jellyfin Web 12.1 remains expected to show the accessible
+refresh action rather than auto-reload, because the playback manager is not a
+verified public window API. On this host, `node --check` and the JavaScript
+suite passed **38/38**; the ABI validator passed; and C# tests passed **11/11**.
+The Release build succeeded with two `NU1900` warnings because NuGet's
+vulnerability-data endpoint was unavailable, not because package restore or
+compilation failed. No tag, release, installation, restart, or browser test was
+performed for this preparation.
 
 ## Actually run
 

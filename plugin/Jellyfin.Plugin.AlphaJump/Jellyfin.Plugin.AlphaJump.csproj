@@ -5,7 +5,7 @@
     <AssemblyName>Jellyfin.Plugin.AlphaJump</AssemblyName>
     <!-- Local builds have a sensible default. Release tags override all three
          version properties with -p:Version/-p:AssemblyVersion/-p:FileVersion. -->
-    <Version>0.1.0.0</Version>
+    <Version>0.3.0.0</Version>
     <AssemblyVersion>$(Version)</AssemblyVersion>
     <FileVersion>$(Version)</FileVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
