@@ -152,14 +152,19 @@ The tests are focused deterministic regressions, not a browser compatibility or 
 
 Release versions come from four-part Git tags. A tag such as `v0.3.0.0`
 automatically runs validation, builds the DLL with version `0.3.0.0`, creates
-`alpha-jump_0.3.0.0.zip`, calculates its MD5 and SHA-256, creates the GitHub
-Release, and commits the real release URL/checksum to `manifest.json` on `main`.
+`alpha-jump_0.3.0.0.zip`, calculates its MD5 and SHA-256, and attaches both
+assets to a **draft** GitHub Release. It then opens a `release-manifest/v…`
+pull request containing the real URL/checksum. After that PR passes CI and is
+merged, the publish workflow verifies the manifest entry and publishes the
+draft release. This keeps `main` protected and attaches every asset before an
+immutable release is published.
 
 The workflows are [CI](.github/workflows/ci.yml) and
 [release](.github/workflows/release.yml). The release ZIP contains only the
 plugin DLL because the configuration page and browser source are embedded and
-Jellyfin supplies the runtime assemblies. A manifest-update commit cannot start
-another release because releases trigger only from matching version tags.
+Jellyfin supplies the runtime assemblies. Manifest pull-request merges cannot
+start another draft-release workflow because it triggers only from matching
+version tags.
 
 ## Security
 
