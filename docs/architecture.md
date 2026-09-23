@@ -10,27 +10,57 @@ Date: 2026-09-20. Target source: Jellyfin Web `v12.1`, commit `fae41f33eb7cd636a
 | Active signed-in user | `src/lib/jellyfin-apiclient/ServerConnections.js:92-99` assigns the active client to `window.ApiClient`; `src/utils/dashboard.js:90-97` calls its `getCurrentUserId()`. | Use public `window.ApiClient.getCurrentUserId()` (and `isLoggedIn()` when available). No storage-key guessing or React context is used. |
 | Zero disables pagination | `src/strings/en-us.json:819-820` explicitly says zero disables pagination and warns of bugs/reduced performance. `src/apps/modern/features/libraries/components/LibraryToolbar.tsx:75-92,234-241` hides pagination when the value is not positive. | Default configuration sets zero once, verifies the local write, and performs at most one session-scoped reload. It never uses pager controls. |
 | Item request semantics | `src/utils/items.ts:122-126` converts zero to an omitted `limit`; `src/hooks/useFetchItems.ts:330-347` still supplies `startIndex: libraryViewSettings.StartIndex`. | Require persisted `StartIndex === 0` before interpreting cards as the complete constrained result. |
-| Public Movies view settings | `src/apps/modern/features/libraries/hooks/useLibrary.tsx:48-59` uses `getSettingsKey`; `utils/settings.ts:30-32` yields `movies - <parentId>`. | Read, but never write, that public local-storage JSON. |
+| Public library view settings | `src/apps/modern/features/libraries/hooks/useLibrary.tsx:48-59` uses `getSettingsKey`; `utils/settings.ts:30-32` yields `<LibraryTab> - <parentId>`. | Read, but never write, the route registry's public local-storage JSON. |
 | Render and readiness | `ItemsView.tsx:186-210` maps alphabet changes to persisted `Alphabet`/`StartIndex`; it renders `Loading` while pending and otherwise Cards or `NoItemsMessage`. `LoadingComponent.tsx` and `loading.ts` provide the spinner; `LibraryToolbar.tsx:62-92` uses the pending bullet. | Require no native alphabet, no pending marker, and cards or the actual no-items message. |
-| Card/picker identity | `AlphabetPicker.tsx:37-88` renders the MUI toggle group; `LibraryPage.tsx:13-38` gives Movies `#moviesPage`; `src/utils/items.ts:159-183` emits `data-prefix`. | Identify the exact picker shape and match rendered `data-prefix` with `startsWith`. |
+| Card/picker identity | `AlphabetPicker.tsx:37-88` renders the MUI toggle group; `LibraryPage.tsx` maps each library page ID; `src/utils/items.ts:159-183` emits `data-prefix`; the card builder emits `data-type`. | Identify the exact picker shape and match rendered `data-prefix` with `startsWith`, after every card satisfies the route's allowed type contract. |
 
 No private React context, query client, network interception, or independent item request is used.
 
-## Support and readiness gates
+## Support registry and readiness gates
 
-The script reads public inputs:
+`src/alpha-jump.js` contains a deliberately small `VIEW_REGISTRY`; it is not a
+generic “all cards” selector. The following routes/tabs are source-backed by
+`libraryRoutes.ts`, `LibraryPage.tsx`, `views/*.ts`, `settings.ts`, and
+`defaults.ts` in pinned Jellyfin Web 12.1:
 
-1. Route/hash and `#moviesPage` establish Movies scope.
-2. `movies - <topParentId>` establishes `ViewMode`, sort, filters/search-related view state, `Alphabet`, and explicit `StartIndex`.
-3. The numeric toolbar count exactly matching rendered Movie-card count proves the currently shown result is complete. This is independently required after preference configuration.
+| Route/page | Supported tabs/settings keys | Allowed card types |
+| --- | --- | --- |
+| `#/movies` / `#moviesPage` | Movies, Favorites, Collections | `Movie`, `BoxSet` |
+| `#/tv` / `#tvshowsPage` | Series, Collections | `Series`, `BoxSet` |
+| `#/books` / `#booksPage` | Folders, Books, Collections, Favorites | `Folder`, `AudioBook`, `Book`, `BoxSet` |
+| `#/boxsets` / `#boxsetsPage` | Collections, Favorites | `BoxSet` |
+| `#/homevideos` / `#homevideos` | Folders, Photos, Photo Albums, Videos | `Folder`, `Photo`, `PhotoAlbum`, `Video` |
+| `#/mixed` / `#mixed` | Folders, Mixed, Collections | `Folder`, `Movie`, `Series`, `BoxSet` |
+| `#/music` / `#musicPage` | Albums, Collections | `MusicAlbum`, `BoxSet` |
+| `#/musicvideos` / `#musicvideos` | Folders, Music Videos | `Folder`, `MusicVideo` |
+| `#/playlists` / `#playlistsPage` | Playlists, Favorites | `Playlist` |
+
+`#/livetv`, standalone Photos (`photosPage` is marked unused in the pinned
+source), detail routes, suggestions, genres, people, artist/author views,
+songs, episodes/upcoming, and media-library embedded playlists are absent from
+the registry and therefore native. Photo grids are supported only as tabs of a
+Home Videos route. An empty or `unknown` collection type is
+accepted only on `#/mixed`, matching `LibraryPage`'s source mapping; arbitrary
+unknown types remain native.
+
+For standalone injection only, the legacy configuration remains effective:
+`showsEnabled: false` excludes `#/tv`, while `moviesOnly: true` limits support
+to the original Movies main grid. Plugin mode uses its server-side selection
+contract instead and does not expose those legacy browser knobs.
+
+The script reads only public inputs:
+
+1. Route/hash and the registry's page ID establish route/tab scope.
+2. `<LibraryTab> - <topParentId>` establishes `ViewMode`, sort, filters/search-related view state, `Alphabet`, and explicit `StartIndex`.
+3. The numeric toolbar count exactly matching every rendered allowed card proves the currently shown result is complete. This is independently required after preference configuration.
 
 It arms only for grid + ascending `SortName`, explicit initial index zero, and a complete rendered result. Equality supports a complete small library/filter too; a count above 100 alone never does. A native alphabet subset is only intercepted after the same alphabet-clear query was already confirmed in this page session.
 
 Complete-query readiness is deliberately separate from support. It requires:
 
 - native and stored alphabet state cleared;
-- no Movies toolbar pending bullet; and
-- at least one Movie card, or Jellyfin's `.noItemsMessage.centerMessage`.
+- no query-specific LibraryToolbar pending bullet; and
+- at least one allowed card, or Jellyfin's `.noItemsMessage.centerMessage`.
 
 This follows the `ItemsView` render branch above. It does not treat missing cards, a disabled control, or a cleared button alone as proof that replacement results are ready. A native clear is allowed to retain the same cards: its evidence is cleared persisted/native alphabet state plus the normal ready branch, not a forced card-signature change.
 
@@ -69,7 +99,15 @@ cannot intentionally configure zero again.
 
 ## Lifecycle and cleanup
 
-The active result observer is scoped to `#moviesPage` plus the single source-shaped LibraryToolbar that AppLayout renders outside that page; it only considers card/no-items/pending/picker changes and coalesces each mutation burst to one animation frame. A non-suppressing page-scoped click observer schedules the same check after native toolbar/filter/sort/pager interactions, so a cached same-card query change is still noticed. A small document observer only notices insertion/removal of `#moviesPage` so the result observer can be attached after SPA navigation. It does not discover or rescan cards.
+The active result observer is scoped to the registry-selected page plus the
+single source-shaped LibraryToolbar that AppLayout renders outside that page; it
+only considers card/no-items/pending/picker changes and coalesces each mutation
+burst to one animation frame. A non-suppressing page-scoped click observer
+schedules the same check after native toolbar/filter/sort/pager interactions,
+so a cached same-card query change is still noticed. A small document observer
+only notices insertion/removal of a registry page ID so the result observer can
+be attached after SPA navigation. It does not discover or rescan unrelated
+cards.
 
 Each request has an overall timeout and a readiness timeout, both cancellable. A route/hash, active-user, or query-identity change cancels current work. Query identity contains route, parent, and persisted view settings except native `Alphabet`; page-size is deliberately excluded because a guessed/stale client setting must not define a query.
 
@@ -91,9 +129,40 @@ On server startup, `IPluginServiceRegistrator` registers a stock ASP.NET Core `I
 
 The transformed response cannot retain static-file validators: request `Accept-Encoding`, `If-None-Match`, and `If-Modified-Since` are removed only for those three candidate index paths; an injected response strips `ETag`, `Last-Modified`, `Content-Encoding`, and `Content-Range` before recalculating `Content-Length`. This is intentionally limited to the index document. Actual cache/compression behavior with Jellyfin Enhanced or File Transformation remains untested.
 
-The plugin configuration stores global flags and XML-compatible `LibrarySelectionRecord` values, rather than a dictionary. Every record holds an unhyphenated GUID and enabled state. `AlphaJumpConfigurationService` enumerates Jellyfin's configured `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()` on both client-config and administrator-config access, parsing each valid `ItemId` into the stable GUID. Invalid or missing IDs are logged and skipped so one malformed virtual folder cannot break the settings page. Under one service lock, discovery adds exactly one record for each new Movies/Shows folder using the policy that existed at discovery; it never rewrites existing choices or removes stale IDs. This makes existing libraries default enabled on initial setup, preserves explicit choices across rename/reload/policy changes, and keeps deleted records harmless. The elevation-protected dashboard endpoint displays every current library, disables unsupported types with an explanation, and applies only submitted supported selections after discovery, avoiding a discovery write overwriting an administrator choice. Its library rows use the persisted selection without applying the global switch, while the client endpoint applies that switch for fail-closed runtime behavior. The authenticated client endpoint returns only one requested normalized GUID and Alpha Jump's five booleans, not an inventory.
+The plugin configuration stores global flags and XML-compatible
+`LibrarySelectionRecord` values, rather than a dictionary. Every record holds
+an unhyphenated GUID and enabled state. `AlphaJumpConfigurationService`
+enumerates Jellyfin's configured `VirtualFolderInfo` values through
+`ILibraryManager.GetVirtualFolders()` on both client-config and
+administrator-config access, parsing each valid `ItemId` into the stable GUID.
+Invalid or missing IDs are logged and skipped so one malformed virtual folder
+cannot break the settings page. Under one service lock, discovery adds exactly
+one record for each new source-backed compatible folder using the policy that
+existed at discovery; it never rewrites existing choices or removes stale IDs.
+This makes existing libraries default enabled on initial setup, preserves
+explicit choices across rename/reload/policy changes, and keeps deleted records
+harmless. The elevation-protected dashboard endpoint displays every current
+library, disables unsupported types (including Live TV) with an explanation,
+and applies only submitted supported selections after discovery, avoiding a
+discovery write overwriting an administrator choice. Its library rows use the
+persisted selection without applying the global switch, while the client
+endpoint applies that switch for fail-closed runtime behavior. Built-in
+Collections has a separate persisted boolean and endpoint scope because it is
+not a discovered virtual folder and must not receive a fabricated GUID. The
+dashboard also renders Live TV as a deliberately disabled built-in row with an
+empty ID rather than pretending it is a configurable virtual folder. The
+authenticated client endpoint returns only one requested normalized GUID or the
+Collections scope and Alpha Jump's five booleans, not an inventory.
 
-In plugin mode, the browser code does not set its page-size preference or attach picker capture handlers until it validates contract version 1 for the current `topParentId`. A malformed or failed request marks that route unavailable and retains native behavior; it cannot fall back to the standalone defaults. A missing public `ApiClient` or not-yet-authenticated client is treated separately as startup readiness: it uses at most eight short timeout retries, cancels on route change/destroy, and retains native behavior throughout. Browser refresh is the configured change boundary.
+In plugin mode, the browser code does not set its page-size preference or attach
+picker capture handlers until it validates contract version 2 for the current
+normalized `topParentId`, or the explicit built-in Collections scope. A malformed
+or failed request marks that route unavailable and retains native behavior; it
+cannot fall back to the standalone defaults. A missing public `ApiClient` or
+not-yet-authenticated client is treated separately as startup readiness: it uses
+at most eight short timeout retries, cancels on route change/destroy, and
+retains native behavior throughout. Browser refresh is the configured change
+boundary.
 
 ## Shows extension — 2026-09-21
 

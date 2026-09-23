@@ -1,8 +1,54 @@
 # Alpha Jump test record
 
-Date: 2026-09-20 to 2026-09-21. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
+Date: 2026-09-20 to 2026-09-23. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
 
 Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
+
+## Expanded compatible-library registry — 2026-09-23
+
+The current local change expands the source-backed registry beyond Movies and
+Shows. Deterministic tests exercise exact route/page/settings/card-type
+contracts for Movies, Shows, Books/Audiobooks, built-in Collections, Home
+Videos and its Photo/Photo Album/Video tabs, Mixed, Music albums, Music Videos,
+and top-level Playlists. They also exercise absent first-use settings, native
+alphabet clearing, heterogeneous/missing-prefix rejection, the separate
+Collections configuration scope, and native fallbacks for Live TV, songs,
+suggestions, and detail pages.
+
+`ILibraryManager.GetVirtualFolders()` test-host coverage now maps Books and
+Home Videos from real `VirtualFolderInfo` shapes, skips malformed IDs, and
+verifies all source-backed collection types synchronize selection state while
+Live TV and arbitrary unsupported types stay disabled. The built-in Collections
+toggle is XML round-trip tested separately from folder IDs. These are automated
+local results, not a served dashboard or browser result.
+
+On 2026-09-23, `node --check src/alpha-jump.js` passed and the full Node suite
+passed **88/88**. The Release C# test suite passed **24/24**. The Release
+production build succeeded; its sole `NU1900` warning was NuGet vulnerability
+metadata retrieval blocked by this environment, not a compiler warning or test
+failure. `node scripts/validate-release-abi.js` confirmed the 12.1.0.0 release
+ABI metadata, and `git diff --check` passed. No Jellyfin server, browser tab,
+dashboard, Injector entry, installation, restart, commit, push, or publication
+was performed for this expansion.
+
+### Required browser checks for this expansion (not yet run)
+
+1. In **Collections**, enable its separate dashboard setting, use the
+   Collections and Favorites tabs in ascending Name grid view, and verify the
+   authenticated client-config request uses `scope=collections` without a
+   `libraryId`.
+2. In an **Audiobooks/Books** folder, test Folders and Books with mixed
+   `Folder`/`AudioBook`/`Book` cards, then Collections/Favorites where present.
+   Confirm the rendered total equals every allowed card and a native alphabet
+   parameter is absent during a jump.
+3. In the downloaded **YouTube** library, record its configured collection type
+   instead of its name. Test only the corresponding supported grid (commonly
+   Home Videos, Mixed, Movies, or Music Videos); verify a type mismatch leaves
+   the native picker intact.
+4. Navigate between supported tabs/libraries during a pending jump, then enter
+   Live TV, a song list, a suggestion page, a detail page, and a standalone
+   Photos library. Confirm pending work cancels and all excluded pages remain
+   native.
 
 ## Stateless alphabet commands — 2026-09-22
 

@@ -44,6 +44,24 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
     }
 
     /// <inheritdoc />
+    public ClientLibraryConfiguration GetBuiltInCollectionsConfiguration()
+    {
+        lock (_sync)
+        {
+            var configuration = RequireConfiguration();
+            // Collections is a Jellyfin-provided route rather than a media folder.
+            // Do not make it depend on whether a server happens to expose a
+            // matching virtual folder, and do not fabricate a folder ID.
+            return new ClientLibraryConfiguration(
+                configuration.Enabled,
+                configuration.BuiltInCollectionsEnabled,
+                configuration.AutoDisablePagination,
+                configuration.SmoothScroll,
+                configuration.Debug);
+        }
+    }
+
+    /// <inheritdoc />
     public AdministratorConfiguration GetAdministratorConfiguration()
     {
         lock (_sync)
@@ -63,6 +81,7 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
             var libraries = DiscoverAndSynchronize(configuration);
             configuration.Enabled = update.Enabled;
             configuration.AutoEnableNewSupportedLibraries = update.AutoEnableNewSupportedLibraries;
+            configuration.BuiltInCollectionsEnabled = update.BuiltInCollectionsEnabled;
             configuration.AutoDisablePagination = update.AutoDisablePagination;
             configuration.SmoothScroll = update.SmoothScroll;
             configuration.Debug = update.Debug;
@@ -108,22 +127,33 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
         return libraries;
     }
 
-    private static AdministratorConfiguration ToAdministratorConfiguration(
+    internal static AdministratorConfiguration ToAdministratorConfiguration(
         PluginConfiguration configuration,
         IReadOnlyList<LibraryDescriptor> libraries)
     {
         return new AdministratorConfiguration(
             configuration.Enabled,
             configuration.AutoEnableNewSupportedLibraries,
+            configuration.BuiltInCollectionsEnabled,
             configuration.AutoDisablePagination,
             configuration.SmoothScroll,
             configuration.Debug,
             libraries.Select(library => new AdministratorLibrary(
-                LibraryId.Normalize(library.Id),
-                library.Name,
-                library.CollectionType,
-                library.IsSupported,
-                library.IsSupported && LibrarySelection.IsSelectionEnabled(configuration, library.Id),
-                library.UnsupportedReason)).ToArray());
+                    LibraryId.Normalize(library.Id),
+                    library.Name,
+                    library.EffectiveCollectionType,
+                    library.IsSupported,
+                    library.IsSupported && LibrarySelection.IsSelectionEnabled(configuration, library.Id),
+                    library.UnsupportedReason))
+                // Live TV is a built-in Web route, not a VirtualFolderInfo, so
+                // display its deliberate exclusion without fabricating an ID.
+                .Append(new AdministratorLibrary(
+                    string.Empty,
+                    "Live TV",
+                    "livetv",
+                    false,
+                    false,
+                    "Live TV is intentionally unsupported; Alpha Jump leaves its guides, channels, and recordings native."))
+                .ToArray());
     }
 }

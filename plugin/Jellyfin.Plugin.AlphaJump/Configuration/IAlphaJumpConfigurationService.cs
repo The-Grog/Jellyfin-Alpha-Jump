@@ -9,6 +9,9 @@ public interface IAlphaJumpConfigurationService
     /// <summary>Gets a discovered library's effective configuration, failing closed when unknown.</summary>
     ClientLibraryConfiguration GetClientConfiguration(Guid libraryId);
 
+    /// <summary>Gets the explicit configuration for Jellyfin's built-in Collections view.</summary>
+    ClientLibraryConfiguration GetBuiltInCollectionsConfiguration();
+
     /// <summary>Gets the current configuration and every current library for the administrator page.</summary>
     AdministratorConfiguration GetAdministratorConfiguration();
 
@@ -28,6 +31,7 @@ public sealed record ClientLibraryConfiguration(
 public sealed record AdministratorConfiguration(
     bool Enabled,
     bool AutoEnableNewSupportedLibraries,
+    bool BuiltInCollectionsEnabled,
     bool AutoDisablePagination,
     bool SmoothScroll,
     bool Debug,
@@ -46,6 +50,7 @@ public sealed record AdministratorLibrary(
 public sealed record AdministratorConfigurationUpdate(
     bool Enabled,
     bool AutoEnableNewSupportedLibraries,
+    bool BuiltInCollectionsEnabled,
     bool AutoDisablePagination,
     bool SmoothScroll,
     bool Debug,

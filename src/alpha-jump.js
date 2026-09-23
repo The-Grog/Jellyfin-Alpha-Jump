@@ -1,5 +1,5 @@
 /*
- * Jellyfin Alpha Jump prototype for Jellyfin Web 12.1 modern Movies and Shows.
+ * Jellyfin Alpha Jump for Jellyfin Web 12.1 source-backed library grids.
  *
  * This is deliberately a browser-only DOM enhancement. By default it sets the
  * signed-in user's browser-local Library page-size preference to 0 once, then
@@ -50,6 +50,58 @@
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
     const LOG_PREFIX = '[AlphaJump]';
+    // This registry is deliberately narrower than Jellyfin's route list. Each
+    // entry is an ItemsView grid with a v12.1 route, tab, local-storage key,
+    // and explicit rendered item contract. Suggestions, genres, people,
+    // songs, playlists embedded in a media library, Live TV, and detail pages
+    // are intentionally absent and retain Jellyfin's native behavior.
+    const VIEW_REGISTRY = [
+        { path: '#/movies', collectionTypes: ['movies'], pageId: 'moviesPage', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'movies', itemTypes: ['Movie'] },
+            { tab: 2, settingsKey: 'favorites', itemTypes: ['Movie'] },
+            { tab: 3, settingsKey: 'collections', itemTypes: ['BoxSet'] }
+        ] },
+        { path: '#/tv', collectionTypes: ['tvshows'], pageId: 'tvshowsPage', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'series', itemTypes: ['Series'] },
+            { tab: 6, settingsKey: 'collections', itemTypes: ['BoxSet'] }
+        ] },
+        { path: '#/books', collectionTypes: ['books'], pageId: 'booksPage', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'folders', itemTypes: ['Folder', 'AudioBook', 'Book'] },
+            { tab: 1, settingsKey: 'books', itemTypes: ['AudioBook', 'Book'] },
+            { tab: 5, settingsKey: 'collections', itemTypes: ['BoxSet'] },
+            { tab: 6, settingsKey: 'favorites', itemTypes: ['AudioBook', 'Book'] }
+        ] },
+        // /boxsets is a server-provided Collections view, not a media folder.
+        // Its opt-in is therefore scoped separately in plugin mode.
+        { path: '#/boxsets', collectionTypes: ['boxsets'], pageId: 'boxsetsPage', defaultTab: 0, scope: 'collections', views: [
+            { tab: 0, settingsKey: 'collections', itemTypes: ['BoxSet'] },
+            { tab: 1, settingsKey: 'favorites', itemTypes: ['BoxSet'] }
+        ] },
+        { path: '#/homevideos', collectionTypes: ['homevideos'], pageId: 'homevideos', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'folders', itemTypes: ['Folder', 'Photo', 'PhotoAlbum', 'Video'] },
+            { tab: 1, settingsKey: 'photos', itemTypes: ['Photo'] },
+            { tab: 2, settingsKey: 'photoalbums', itemTypes: ['PhotoAlbum'] },
+            { tab: 3, settingsKey: 'videos', itemTypes: ['Video'] }
+        ] },
+        { path: '#/mixed', collectionTypes: ['mixed'], pageId: 'mixed', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'folders', itemTypes: ['Folder', 'Movie', 'Series'] },
+            { tab: 2, settingsKey: 'mixed', itemTypes: ['Movie', 'Series'] },
+            { tab: 3, settingsKey: 'collections', itemTypes: ['BoxSet'] }
+        ] },
+        { path: '#/music', collectionTypes: ['music'], pageId: 'musicPage', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'albums', itemTypes: ['MusicAlbum'] },
+            { tab: 7, settingsKey: 'collections', itemTypes: ['BoxSet'] }
+        ] },
+        { path: '#/musicvideos', collectionTypes: ['musicvideos'], pageId: 'musicvideos', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'folders', itemTypes: ['Folder', 'MusicVideo'] },
+            { tab: 2, settingsKey: 'musicvideos', itemTypes: ['MusicVideo'] }
+        ] },
+        { path: '#/playlists', collectionTypes: ['playlists'], pageId: 'playlistsPage', defaultTab: 0, views: [
+            { tab: 0, settingsKey: 'playlists', itemTypes: ['Playlist'] },
+            { tab: 1, settingsKey: 'favorites', itemTypes: ['Playlist'] }
+        ] }
+    ];
+    const SUPPORTED_PAGE_SELECTOR = VIEW_REGISTRY.map(view => '#' + view.pageId).join(', ');
     const state = {
         destroyed: false,
         picker: null,
@@ -79,10 +131,10 @@
         // standalone defaults.
         plugin: {
             marker: null,
-            libraryId: null,
+            routeKey: null,
             configuration: null,
             pending: null,
-            failedLibraries: new Set(),
+            failedRoutes: new Set(),
             readinessRetry: null,
             readinessFailureReported: new Set(),
             update: { initial: null, pending: null, request: null, retry: null, retries: 0, lastCheck: 0, restartUntil: 0, generation: 0, client: null, notice: null, unsubscribe: null, focus: null, visibility: null }
@@ -303,13 +355,17 @@
         return /^[0-9a-f]{32}$/.test(compact) ? compact : null;
     }
 
-    function validatePluginConfiguration(payload, libraryId) {
+    function validatePluginConfiguration(payload, route) {
+        const scope = pluginValue(payload, 'scope');
         if (!payload || typeof payload !== 'object'
-            || pluginValue(payload, 'contractVersion') !== 1
-            || normalizeLibraryId(pluginValue(payload, 'libraryId')) === null
-            || normalizeLibraryId(pluginValue(payload, 'libraryId')) !== normalizeLibraryId(libraryId)) {
+            || pluginValue(payload, 'contractVersion') !== 2
+            || scope !== route.configScope) {
             return null;
         }
+        if (scope === 'library'
+            && (normalizeLibraryId(pluginValue(payload, 'libraryId')) === null
+                || normalizeLibraryId(pluginValue(payload, 'libraryId')) !== normalizeLibraryId(route.parentId))) return null;
+        if (scope === 'collections' && pluginValue(payload, 'libraryId') != null) return null;
         const fields = ['enabled', 'libraryEnabled', 'autoDisablePagination', 'smoothScroll', 'debug'];
         if (fields.some(field => typeof pluginValue(payload, field) !== 'boolean')) return null;
         return Object.fromEntries(fields.map(field => [field, pluginValue(payload, field)]));
@@ -321,7 +377,7 @@
 
     function pluginAllowsRoute(route) {
         if (!pluginMode()) return true;
-        return state.plugin.libraryId === normalizeLibraryId(route.parentId)
+        return state.plugin.routeKey === route.configKey
             && state.plugin.configuration !== null
             && state.plugin.configuration.enabled
             && state.plugin.configuration.libraryEnabled;
@@ -336,9 +392,9 @@
         CONFIG.debug = configuration.debug;
     }
 
-    function clearPluginReadinessRetry(libraryId = null) {
+    function clearPluginReadinessRetry(routeKey = null) {
         const retry = state.plugin.readinessRetry;
-        if (!retry || (libraryId && retry.libraryId !== libraryId)) return;
+        if (!retry || (routeKey && retry.routeKey !== routeKey)) return;
         if (retry.timer) root.clearTimeout(retry.timer);
         state.plugin.readinessRetry = null;
     }
@@ -352,26 +408,28 @@
         }
     }
 
-    function schedulePluginReadinessRetry(route, libraryId) {
+    function schedulePluginReadinessRetry(route) {
+        const routeKey = route.configKey;
+        if (!routeKey) return;
         const previous = state.plugin.readinessRetry;
-        if (previous?.libraryId === libraryId && previous.timer) return;
-        if (previous && previous.libraryId !== libraryId) clearPluginReadinessRetry();
-        const attempts = previous?.libraryId === libraryId ? previous.attempts + 1 : 1;
+        if (previous?.routeKey === routeKey && previous.timer) return;
+        if (previous && previous.routeKey !== routeKey) clearPluginReadinessRetry();
+        const attempts = previous?.routeKey === routeKey ? previous.attempts + 1 : 1;
         if (attempts > CONFIG.maxPluginApiRetries) {
-            if (!state.plugin.readinessFailureReported.has(libraryId)) {
-                state.plugin.readinessFailureReported.add(libraryId);
+            if (!state.plugin.readinessFailureReported.has(routeKey)) {
+                state.plugin.readinessFailureReported.add(routeKey);
                 reportError('Alpha Jump plugin configuration did not become available during startup. Native behavior remains available.');
             }
-            state.plugin.readinessRetry = { libraryId, attempts, timer: null };
+            state.plugin.readinessRetry = { routeKey, attempts, timer: null };
             return;
         }
 
-        const retry = { libraryId, attempts, timer: null };
+        const retry = { routeKey, attempts, timer: null };
         retry.timer = root.setTimeout(() => {
             retry.timer = null;
             if (state.destroyed || state.plugin.readinessRetry !== retry) return;
             const currentRoute = routeInfo();
-            if (normalizeLibraryId(currentRoute.parentId) !== libraryId) return;
+            if (currentRoute.configKey !== routeKey) return;
             void loadPluginConfiguration(currentRoute)
                 .then(loaded => { if (loaded) scheduleLifecycle(); })
                 .catch(() => scheduleLifecycle());
@@ -381,37 +439,39 @@
     }
 
     function loadPluginConfiguration(route) {
-        if (!pluginMode() || !route.kind || !route.parentId) return Promise.resolve();
-        const libraryId = normalizeLibraryId(route.parentId);
-        if (!libraryId) return Promise.reject(new Error('route library ID was invalid'));
-        if (state.plugin.libraryId === libraryId && state.plugin.configuration) return Promise.resolve();
-        if (state.plugin.pending?.libraryId === libraryId) return state.plugin.pending.promise;
-        if (state.plugin.failedLibraries.has(libraryId)) return Promise.reject(new Error('plugin configuration previously failed'));
+        if (!pluginMode() || !route.kind || !route.configKey) return Promise.resolve();
+        const routeKey = route.configKey;
+        if (state.plugin.routeKey === routeKey && state.plugin.configuration) return Promise.resolve();
+        if (state.plugin.pending?.routeKey === routeKey) return state.plugin.pending.promise;
+        if (state.plugin.failedRoutes.has(routeKey)) return Promise.reject(new Error('plugin configuration previously failed'));
 
         const client = root.ApiClient;
         if (!pluginClientIsReady(client)) {
-            schedulePluginReadinessRetry(route, libraryId);
+            schedulePluginReadinessRetry(route);
             return Promise.resolve(false);
         }
-        clearPluginReadinessRetry(libraryId);
+        clearPluginReadinessRetry(routeKey);
 
-        const url = `${state.plugin.marker.configUrl}${state.plugin.marker.configUrl.includes('?') ? '&' : '?'}libraryId=${encodeURIComponent(route.parentId)}`;
+        const parameter = route.configScope === 'collections'
+            ? 'scope=collections'
+            : `libraryId=${encodeURIComponent(route.parentId)}`;
+        const url = `${state.plugin.marker.configUrl}${state.plugin.marker.configUrl.includes('?') ? '&' : '?'}${parameter}`;
         const pending = {
-            libraryId,
+            routeKey,
             promise: client.ajax({ type: 'GET', url, dataType: 'json' })
                 .then(payload => {
-                    const configuration = validatePluginConfiguration(payload, libraryId);
-                    if (!configuration) throw new Error('plugin configuration response did not match contract v1');
+                    const configuration = validatePluginConfiguration(payload, route);
+                    if (!configuration) throw new Error('plugin configuration response did not match contract v2');
                     // A route can change while an authenticated request is in flight.
                     // Store only the response for the route that requested it.
-                    state.plugin.libraryId = libraryId;
+                    state.plugin.routeKey = routeKey;
                     state.plugin.configuration = configuration;
                     configureFromPlugin(configuration);
                     return true;
                 })
                 .catch(caught => {
-                    state.plugin.failedLibraries.add(libraryId);
-                    state.plugin.libraryId = libraryId;
+                    state.plugin.failedRoutes.add(routeKey);
+                    state.plugin.routeKey = routeKey;
                     state.plugin.configuration = null;
                     reportError('Alpha Jump plugin configuration could not be loaded. Native behavior remains available.', caught);
                     throw caught;
@@ -441,39 +501,63 @@
         const path = (splitAt < 0 ? hash : hash.slice(0, splitAt)).toLowerCase();
         const params = new URLSearchParams(splitAt < 0 ? '' : hash.slice(splitAt + 1));
         const parentId = params.get('topParentId');
-        const isMovies = path === '#/movies' && params.get('collectionType') === 'movies';
-        const isShows = path === '#/tv' && params.get('collectionType') === 'tvshows';
-        const kind = isMovies ? 'movies' : isShows ? 'series' : null;
-        // Match useCurrentTab's explicit tab or browser-local landing preference.
-        const tab = params.get('tab');
-        let mainTab = tab === '0';
-        if (tab === null && kind) {
-            const userId = currentUserId();
-            try {
-                const landing = userId ? root.localStorage.getItem(userId + '-landing-' + parentId) : null;
-                mainTab = !!userId && (!landing || landing === kind);
-            } catch {
-                mainTab = false;
+        const requestedCollectionType = (params.get('collectionType') || '').trim().toLowerCase();
+        // Web maps an empty/unknown collection type to /mixed. This is the only
+        // unknown-type normalization accepted here; arbitrary types stay native.
+        const collectionType = !requestedCollectionType || requestedCollectionType === 'unknown'
+            ? 'mixed'
+            : requestedCollectionType;
+        const definition = VIEW_REGISTRY.find(candidate => candidate.path === path
+            && candidate.collectionTypes.includes(collectionType)) || null;
+        const tabParameter = params.get('tab');
+        let view = null;
+        if (definition && parentId) {
+            if (tabParameter !== null) {
+                const tab = Number.parseInt(tabParameter, 10);
+                view = String(tab) === tabParameter ? definition.views.find(candidate => candidate.tab === tab) || null : null;
+            } else {
+                const userId = currentUserId();
+                try {
+                    const landing = userId ? root.localStorage.getItem(userId + '-landing-' + parentId) : null;
+                    view = landing === null || landing === ''
+                        ? definition.views.find(candidate => candidate.tab === definition.defaultTab) || null
+                        : definition.views.find(candidate => candidate.settingsKey === landing) || null;
+                } catch {
+                    view = null;
+                }
             }
         }
+        // Retain the standalone prototype's documented opt-outs. Plugin mode
+        // does not supply these legacy knobs, but a local injector user may
+        // deliberately choose Movies-only or disable Shows. Movies-only keeps
+        // the original Movies main grid rather than silently expanding to
+        // collections or another library type.
+        const legacyAllowed = !CONFIG.moviesOnly
+            || (definition?.path === '#/movies' && view?.tab === 0);
+        const showsAllowed = definition?.path !== '#/tv' || CONFIG.showsEnabled;
+        const configScope = definition?.scope || 'library';
+        const normalizedLibraryId = normalizeLibraryId(parentId);
+        const configKey = configScope === 'collections'
+            ? 'collections'
+            : normalizedLibraryId ? `library:${normalizedLibraryId}` : null;
         return {
-            hash, parentId, isMovies, isShows, kind,
-            supported: !!kind && mainTab && (!isShows || (CONFIG.showsEnabled && !CONFIG.moviesOnly)),
-            pageId: isShows ? 'tvshowsPage' : 'moviesPage',
-            itemType: isShows ? 'Series' : 'Movie'
+            hash, parentId, collectionType, kind: view?.settingsKey || null,
+            definition, view, configScope, configKey,
+            supported: !!definition && !!view && !!parentId && legacyAllowed && showsAllowed,
+            pageId: definition?.pageId || null,
+            itemTypes: view?.itemTypes || []
         };
     }
 
-    // v12.1 uses lowercase Movies/Series tab values in the view settings key.
+    // v12.1 stores every ItemsView setting under "LibraryTab - topParentId".
     function readViewSettings(route) {
-        if (!route.parentId) return null;
+        if (!route.parentId || !route.kind) return null;
         try {
             const raw = root.localStorage.getItem(`${route.kind} - ${route.parentId}`);
             // LibraryProvider uses getDefaultLibraryViewSettings before the first
-            // native edit persists this key. Absence is a normal first visit,
-            // not an unsupported view. Mirror v12.1 Movies/Series defaults only;
-            // never overwrite storage or fill in incomplete persisted objects.
-            if (raw === null && (route.kind === 'movies' || route.kind === 'series')) {
+            // native edit persists this key. Every registry view is source-backed
+            // as grid + SortName ascending by default (Songs is excluded).
+            if (raw === null) {
                 return {
                     ShowTitle: true,
                     ShowYear: true,
@@ -695,7 +779,16 @@
     }
 
     function cardsIn(page, route) {
-        return Array.from(page.querySelectorAll(`.card[data-prefix][data-type="${route.itemType}"]`));
+        // ItemsView renders Cards inside this source-backed container. Count every
+        // card there exactly once, then fail closed if any result has a missing
+        // prefix or an unexpected type; never silently count a preferred subtype.
+        return Array.from(page.querySelectorAll('.itemsContainer .card'));
+    }
+
+    function cardsMatchRouteContract(cards, route) {
+        return cards.every(card => typeof card.dataset?.prefix === 'string'
+            && card.dataset.prefix.length > 0
+            && route.itemTypes.includes(card.dataset.type));
     }
 
     // LibraryToolbar is rendered by AppLayout, outside the Page/#moviesPage
@@ -723,7 +816,9 @@
 
     function renderedCardsMatchToolbarTotal(context) {
         const total = renderedResultCount(context.toolbar);
-        return Number.isInteger(total) && context.cards.length === total;
+        return context.cardsMatchRouteContract
+            && Number.isInteger(total)
+            && context.cards.length === total;
     }
 
     function hasConfirmedNativeAlphabetSubset(context) {
@@ -760,7 +855,7 @@
         return hasSavedUnpaginatedPreference()
             || state.confirmedUnpaginatedQueryId === context.queryId
             || (context.loading
-                ? context.cards.length > 100
+                ? (context.cards.length === 0 || context.cardsMatchRouteContract) && context.cards.length > 100
                 : hasCompleteUnpaginatedResult(context));
     }
 
@@ -809,6 +904,7 @@
             picker,
             toolbar,
             cards,
+            cardsMatchRouteContract: cardsMatchRouteContract(cards, route),
             empty: !!page.querySelector('.noItemsMessage.centerMessage'),
             loading: hasLoadingMarker(toolbar),
             alphabetClear: isAlphabetClear(settings, picker),
@@ -964,8 +1060,8 @@
             if (target?.matches?.('.MuiChip-label')) return true;
             return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(node => {
                 if (node.nodeType !== 1) return false;
-                return node.matches?.('.card[data-prefix], .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label')
-                    || !!node.querySelector?.('.card[data-prefix], .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label');
+                return node.matches?.('.itemsContainer .card, .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label')
+                    || !!node.querySelector?.('.itemsContainer .card, .noItemsMessage, .alphaPicker-fixed-right, .MuiChip-label');
             });
         });
     }
@@ -1142,17 +1238,16 @@
         // library render. This is also where SPA client replacement is noticed.
         ensureUpdateSubscription();
         const route = routeInfo();
-        const normalizedRouteLibraryId = normalizeLibraryId(route.parentId);
-        if (state.plugin.readinessRetry && state.plugin.readinessRetry.libraryId !== normalizedRouteLibraryId) {
+        if (state.plugin.readinessRetry && state.plugin.readinessRetry.routeKey !== route.configKey) {
             clearPluginReadinessRetry();
         }
         // Plugin mode never arms from standalone defaults. Wait for one
         // authenticated, route-specific response before touching preferences or
         // picker events; failed requests leave Jellyfin's native picker intact.
-        if (pluginMode() && route.kind && route.parentId && !pluginAllowsRoute(route)) {
-            const hasRouteConfiguration = state.plugin.libraryId === normalizedRouteLibraryId
+        if (pluginMode() && route.kind && route.configKey && !pluginAllowsRoute(route)) {
+            const hasRouteConfiguration = state.plugin.routeKey === route.configKey
                 && state.plugin.configuration !== null;
-            if (!hasRouteConfiguration && !state.plugin.failedLibraries.has(normalizedRouteLibraryId)) {
+            if (!hasRouteConfiguration && !state.plugin.failedRoutes.has(route.configKey)) {
                 void loadPluginConfiguration(route)
                     .then(loaded => { if (loaded) scheduleLifecycle(); })
                     .catch(() => scheduleLifecycle());
@@ -1161,7 +1256,7 @@
             detachSurface(true);
             return;
         }
-        if (pluginMode() && (!route.kind || !route.parentId)) {
+        if (pluginMode() && (!route.kind || !route.configKey)) {
             cancelRun('Cancelled: navigation changed.', false);
             detachSurface(true);
             return;
@@ -1200,18 +1295,18 @@
         return records.some(record => {
             // The page itself remains mounted when a user changes a view setting
             // such as page size. Its result subtree is replaced in place, so a
-            // newly supported state must be reconsidered even when #moviesPage
+            // newly supported state must be reconsidered even when a page root
             // was not added or removed.
             const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
-            if (target?.closest?.('#moviesPage, #tvshowsPage')) return true;
+            if (target?.closest?.(SUPPORTED_PAGE_SELECTOR)) return true;
             // The count toolbar is outside the library page. It can settle after
             // the cards mount, while no surface-specific observer is attached yet.
             if (target?.matches?.('.MuiChip-label') || target?.closest?.('.MuiToolbar-root')) return true;
             return Array.from(record.addedNodes).concat(Array.from(record.removedNodes)).some(node => {
                 if (node.nodeType !== 1) return false;
-                return node.id === 'moviesPage' || node.id === 'tvshowsPage'
+                return node.matches?.(SUPPORTED_PAGE_SELECTOR)
                     || node.matches?.('.MuiToolbar-root, .MuiChip-label')
-                    || !!node.querySelector?.('#moviesPage, #tvshowsPage, .MuiToolbar-root, .MuiChip-label');
+                    || !!node.querySelector?.(`${SUPPORTED_PAGE_SELECTOR}, .MuiToolbar-root, .MuiChip-label`);
             });
         });
     }
@@ -1246,8 +1341,8 @@
             if (state.picker?.group.contains(button)) onPickerClick(event);
         };
         doc.addEventListener('click', state.firstPickerClick, true);
-        // This observer only finds insertion/removal of the active Movies page;
-        // card discovery and result observation remain scoped to #moviesPage.
+        // This observer only finds insertion/removal of a registry page; card
+        // discovery and result observation remain scoped to its ItemsView.
         // It also wakes configuration when public ApiClient identity appears or
         // changes during SPA login/logout; it does not poll or patch that API.
         state.mountObserver = new root.MutationObserver(records => {

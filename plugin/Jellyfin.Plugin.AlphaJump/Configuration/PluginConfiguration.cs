@@ -20,6 +20,13 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public bool AutoEnableNewSupportedLibraries { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets whether Alpha Jump is enabled for Jellyfin's built-in
+    /// Collections route. It is a server-provided view, not a configured media
+    /// folder, so it deliberately has no fabricated library GUID.
+    /// </summary>
+    public bool BuiltInCollectionsEnabled { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets persisted selections for discovered supported libraries.
     /// A list of simple records is deliberately used because Jellyfin persists
     /// plugin configuration as XML and XML serializers do not support a

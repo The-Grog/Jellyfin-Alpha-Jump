@@ -81,6 +81,7 @@ public class AlphaJumpInjectionTests
     {
         public bool IsGloballyEnabled => true;
         public ClientLibraryConfiguration GetClientConfiguration(Guid libraryId) => throw new NotSupportedException();
+        public ClientLibraryConfiguration GetBuiltInCollectionsConfiguration() => throw new NotSupportedException();
         public AdministratorConfiguration GetAdministratorConfiguration() => throw new NotSupportedException();
         public AdministratorConfiguration SaveAdministratorConfiguration(AdministratorConfigurationUpdate update) => throw new NotSupportedException();
     }

@@ -76,6 +76,36 @@ class FakeElement {
     }
 }
 
+// Mirrors only the source-backed entries in Alpha Jump's browser registry.
+// The harness intentionally gives every rendered card a concrete type so the
+// production completeness check can reject heterogeneous/unknown result DOM.
+const TEST_VIEWS = {
+    movies: { path: '#/movies', collectionType: 'movies', pageId: 'moviesPage', settingsKey: 'movies', itemTypes: ['Movie'] },
+    series: { path: '#/tv', collectionType: 'tvshows', pageId: 'tvshowsPage', settingsKey: 'series', itemTypes: ['Series'] },
+    movieCollections: { path: '#/movies', collectionType: 'movies', pageId: 'moviesPage', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 3 },
+    showCollections: { path: '#/tv', collectionType: 'tvshows', pageId: 'tvshowsPage', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 6 },
+    booksFolders: { path: '#/books', collectionType: 'books', pageId: 'booksPage', settingsKey: 'folders', itemTypes: ['Folder', 'AudioBook', 'Book'] },
+    books: { path: '#/books', collectionType: 'books', pageId: 'booksPage', settingsKey: 'books', itemTypes: ['AudioBook', 'Book'], tab: 1 },
+    bookCollections: { path: '#/books', collectionType: 'books', pageId: 'booksPage', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 5 },
+    bookFavorites: { path: '#/books', collectionType: 'books', pageId: 'booksPage', settingsKey: 'favorites', itemTypes: ['AudioBook', 'Book'], tab: 6 },
+    boxsets: { path: '#/boxsets', collectionType: 'boxsets', pageId: 'boxsetsPage', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 0, scope: 'collections' },
+    boxsetFavorites: { path: '#/boxsets', collectionType: 'boxsets', pageId: 'boxsetsPage', settingsKey: 'favorites', itemTypes: ['BoxSet'], tab: 1, scope: 'collections' },
+    homevideos: { path: '#/homevideos', collectionType: 'homevideos', pageId: 'homevideos', settingsKey: 'folders', itemTypes: ['Folder', 'Photo', 'PhotoAlbum', 'Video'] },
+    photos: { path: '#/homevideos', collectionType: 'homevideos', pageId: 'homevideos', settingsKey: 'photos', itemTypes: ['Photo'], tab: 1 },
+    photoalbums: { path: '#/homevideos', collectionType: 'homevideos', pageId: 'homevideos', settingsKey: 'photoalbums', itemTypes: ['PhotoAlbum'], tab: 2 },
+    homevideosVideos: { path: '#/homevideos', collectionType: 'homevideos', pageId: 'homevideos', settingsKey: 'videos', itemTypes: ['Video'], tab: 3 },
+    mixedFolders: { path: '#/mixed', collectionType: 'mixed', pageId: 'mixed', settingsKey: 'folders', itemTypes: ['Folder', 'Movie', 'Series'] },
+    mixed: { path: '#/mixed', collectionType: 'mixed', pageId: 'mixed', settingsKey: 'mixed', itemTypes: ['Movie', 'Series'], tab: 2 },
+    mixedCollections: { path: '#/mixed', collectionType: 'mixed', pageId: 'mixed', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 3 },
+    music: { path: '#/music', collectionType: 'music', pageId: 'musicPage', settingsKey: 'albums', itemTypes: ['MusicAlbum'] },
+    musicCollections: { path: '#/music', collectionType: 'music', pageId: 'musicPage', settingsKey: 'collections', itemTypes: ['BoxSet'], tab: 7 },
+    musicvideosFolders: { path: '#/musicvideos', collectionType: 'musicvideos', pageId: 'musicvideos', settingsKey: 'folders', itemTypes: ['Folder', 'MusicVideo'] },
+    musicvideos: { path: '#/musicvideos', collectionType: 'musicvideos', pageId: 'musicvideos', settingsKey: 'musicvideos', itemTypes: ['MusicVideo'], tab: 2 },
+    playlists: { path: '#/playlists', collectionType: 'playlists', pageId: 'playlistsPage', settingsKey: 'playlists', itemTypes: ['Playlist'] },
+    playlistFavorites: { path: '#/playlists', collectionType: 'playlists', pageId: 'playlistsPage', settingsKey: 'favorites', itemTypes: ['Playlist'], tab: 1 },
+    livetv: { path: '#/livetv', collectionType: 'livetv', pageId: 'liveTvPage', settingsKey: 'programs', itemTypes: ['Program'] }
+};
+
 function createHarness({
     alphabet = null,
     loading = false,
@@ -85,6 +115,8 @@ function createHarness({
     cardCount = renderedCount,
     userId = 'active-user',
     library = 'movies',
+    cardTypes = null,
+    missingPrefixAt = null,
     routeLibraryId = 'library',
     loggedIn = true,
     apiAvailable = true,
@@ -94,9 +126,8 @@ function createHarness({
     playbackExposed = false,
     visibility = 'visible'
 } = {}) {
-    const shows = library === 'series';
-    const pageId = shows ? 'tvshowsPage' : 'moviesPage';
-    const cardSelector = `.card[data-prefix][data-type="${shows ? 'Series' : 'Movie'}"]`;
+    const view = TEST_VIEWS[library] || TEST_VIEWS.movies;
+    const pageId = view.pageId;
     const observers = [];
     const scrollCalls = [];
     const settings = {
@@ -122,15 +153,18 @@ function createHarness({
         button.closest = selector => selector.includes('button') ? button : null;
         return button;
     });
-    const cards = allPrefixes.slice(0, cardCount).map(prefix => new FakeElement({
-        dataset: { prefix },
-        selectors: [cardSelector]
+    const cards = allPrefixes.slice(0, cardCount).map((prefix, index) => new FakeElement({
+        dataset: {
+            ...(index === missingPrefixAt ? {} : { prefix }),
+            type: cardTypes?.[index] || view.itemTypes[index % view.itemTypes.length]
+        },
+        selectors: ['.card']
     }));
     pickerRoot.childrenBySelector.set('[role="group"].MuiToggleButtonGroup-vertical', [group]);
     group.childrenBySelector.set('button[type="button"][value]', buttons);
     group.contains = node => buttons.includes(node);
     page.childrenBySelector.set('.alphaPicker-fixed-right', [pickerRoot]);
-    page.childrenBySelector.set(cardSelector, cards);
+    page.childrenBySelector.set('.itemsContainer .card', cards);
     page.childrenBySelector.set('.noItemsMessage.centerMessage', []);
 
     const documentListeners = new Map();
@@ -155,7 +189,7 @@ function createHarness({
         removeEventListener(type, callback) { if (documentListeners.get(type) === callback) documentListeners.delete(type); }
     };
     const storage = new Map([
-        [`${library} - library`, JSON.stringify(settings)]
+        [`${view.settingsKey} - library`, JSON.stringify(settings)]
     ]);
     const pluginMarker = pluginConfiguration ? new FakeElement() : null;
     if (pluginMarker) {
@@ -174,6 +208,7 @@ function createHarness({
     let isApiAvailable = apiAvailable;
     const subscriptions = [];
     let runtimeCalls = 0;
+    const ajaxRequests = [];
     const nextRuntimeResponse = () => {
         runtimeCalls += 1;
         const value = runtime?.responses?.length ? runtime.responses.shift() : runtime?.response;
@@ -182,9 +217,12 @@ function createHarness({
     const makeApiClient = () => ({
         getCurrentUserId: () => activeUserId,
         isLoggedIn: () => isLoggedIn,
-        ajax: options => pluginConfigurationFailure
-            ? Promise.reject(new Error('server unavailable'))
-            : Promise.resolve(options.url === '/AlphaJump/runtime' ? nextRuntimeResponse() : pluginConfiguration),
+        ajax: options => {
+            ajaxRequests.push(options);
+            return pluginConfigurationFailure
+                ? Promise.reject(new Error('server unavailable'))
+                : Promise.resolve(options.url === '/AlphaJump/runtime' ? nextRuntimeResponse() : pluginConfiguration);
+        },
         subscribe: (_events, callback) => {
             const subscription = { callback, active: true };
             subscriptions.push(subscription);
@@ -196,7 +234,7 @@ function createHarness({
         document,
         playbackManager: playbackExposed ? { isPlayingLocally: () => false } : undefined,
         location: {
-            hash: shows ? '#/tv?topParentId=' + routeLibraryId + '&collectionType=tvshows' : '#/movies?topParentId=' + routeLibraryId + '&collectionType=movies',
+            hash: view.path + '?topParentId=' + routeLibraryId + '&collectionType=' + view.collectionType + (view.tab === undefined ? '' : '&tab=' + view.tab),
             origin: 'http://jellyfin.test',
             reload: () => { reloads += 1; }
         },
@@ -240,7 +278,7 @@ function createHarness({
         const record = { type: 'childList', target, addedNodes: [], removedNodes: [] };
         observers.filter(observer => observer.connected).forEach(observer => observer.callback([record]));
     };
-    const persist = () => storage.set(`${library} - library`, JSON.stringify(settings));
+    const persist = () => storage.set(`${view.settingsKey} - library`, JSON.stringify(settings));
     const setLoading = value => {
         chip.textContent = value ? '∙' : String(allPrefixes.length);
         notify(chip);
@@ -277,7 +315,10 @@ function createHarness({
     return {
         ...instance,
         settings,
+        settingsKey: `${view.settingsKey} - library`,
+        view,
         buttons,
+        cards,
         page,
         pickerRoot,
         chip,
@@ -299,6 +340,7 @@ function createHarness({
         get activeSubscriptions() { return subscriptions.filter(subscription => subscription.active).length; },
         setVisibility: value => { document.visibilityState = value; documentListeners.get('visibilitychange')?.(); },
         get runtimeCalls() { return runtimeCalls; },
+        ajaxRequests,
         get reloads() { return reloads; }
     };
 }
@@ -500,7 +542,7 @@ test('a native alphabet subset is eligible only after this query was proven full
 
     const proven = createHarness({ renderedCount: 101 });
     proven.test.refreshSurface();
-    proven.page.childrenBySelector.set('.card[data-prefix][data-type="Movie"]', proven.test.getContext().cards.slice(0, 2));
+    proven.page.childrenBySelector.set('.itemsContainer .card', proven.test.getContext().cards.slice(0, 2));
     proven.chip.textContent = '2';
     proven.activateNative('M');
     assert.equal(proven.test.hasPotentialUnpaginatedResult(proven.test.getContext()), true);
@@ -574,7 +616,7 @@ test('Shows route uses series settings and Series cards and jumps without native
     assertNoPersistentAlphaJumpMarker(h);
     h.api.destroy();
 });
-test('Shows non-main tabs and explicit opt-outs remain native', () => {
+test('Shows unsupported tabs, saved landing tabs, and standalone opt-outs remain native', () => {
     const h = createHarness({ library: 'series' });
     h.root.location.hash += '&tab=5';
     assert.equal(h.test.getContext(), null);
@@ -589,6 +631,102 @@ test('Shows non-main tabs and explicit opt-outs remain native', () => {
     h.api.config.moviesOnly = true;
     assert.equal(h.test.getContext(), null);
 });
+
+test('standalone Movies-only mode keeps the original Movies main grid and leaves expanded views native', () => {
+    const movies = createHarness({ library: 'movies' });
+    const collections = createHarness({ library: 'movieCollections' });
+    const books = createHarness({ library: 'books' });
+
+    movies.api.config.moviesOnly = true;
+    collections.api.config.moviesOnly = true;
+    books.api.config.moviesOnly = true;
+
+    assert.ok(movies.test.getContext());
+    assert.equal(collections.test.getContext(), null);
+    assert.equal(books.test.getContext(), null);
+});
+
+for (const [library, expected] of Object.entries(TEST_VIEWS).filter(([name]) => name !== 'livetv')) {
+    test(library + ': source-backed grid route accepts its exact card contract and clears native alphabet', async () => {
+        const h = createHarness({ library, prefixes: ['MA', 'ZA'] });
+        // Prove the alphabet-clear query first. A real native alphabet subset
+        // is intentionally not trusted until this query has that proof.
+        h.test.refreshSurface();
+        h.activateNative('M');
+        const context = h.test.getContext();
+        assert.ok(context);
+        assert.equal(context.route.pageId, expected.pageId);
+        assert.equal(context.route.kind, expected.settingsKey);
+        assert.deepEqual(context.route.itemTypes, expected.itemTypes);
+        assert.equal(context.cardsMatchRouteContract, true);
+        h.test.attachSurface(context);
+        const event = h.clickPicker('M');
+        assert.equal(event.prevented, true);
+        await turn();
+        assert.equal(h.settings.Alphabet, null);
+        assert.equal(h.scrollCalls.length, 1);
+        assertNoPersistentAlphaJumpMarker(h);
+        h.api.destroy();
+    });
+}
+
+test('mixed grids do not arm when one rendered card is unsupported or lacks a usable prefix', () => {
+    const wrongType = createHarness({ library: 'booksFolders', cardTypes: ['Folder', 'Movie'] });
+    const missingPrefix = createHarness({ library: 'homevideos', missingPrefixAt: 1 });
+
+    assert.equal(wrongType.test.isReady(wrongType.test.getContext()), false);
+    assert.equal(missingPrefix.test.isReady(missingPrefix.test.getContext()), false);
+});
+
+test('Live TV, song lists, suggestions, and collection details remain native', () => {
+    const liveTv = createHarness({ library: 'livetv' });
+    const songs = createHarness({ library: 'music' });
+    const suggestions = createHarness({ library: 'books' });
+    const details = createHarness({ library: 'movies' });
+    songs.root.location.hash += '&tab=5';
+    suggestions.root.location.hash = suggestions.root.location.hash.replace('&tab=1', '&tab=3');
+    details.root.location.hash = '#/details?id=0123456789abcdef0123456789abcdef';
+
+    assert.equal(liveTv.test.getContext(), null);
+    assert.equal(songs.test.getContext(), null);
+    assert.equal(suggestions.test.getContext(), null);
+    assert.equal(details.test.getContext(), null);
+});
+
+test('built-in Collections uses the distinct server configuration scope without a fabricated library id', async () => {
+    const configuration = {
+        contractVersion: 2,
+        scope: 'collections',
+        libraryId: null,
+        enabled: true,
+        libraryEnabled: true,
+        autoDisablePagination: false,
+        smoothScroll: false,
+        debug: false
+    };
+    const h = createHarness({ library: 'boxsets', pluginConfiguration: configuration });
+    h.init();
+    await turn();
+    assert.equal(h.pickerRoot.listeners.has('click'), true);
+    assert.equal(h.ajaxRequests[0].url, '/AlphaJump/client-config?scope=collections');
+    h.api.destroy();
+});
+
+for (const [library] of Object.entries(TEST_VIEWS).filter(([name]) => name !== 'livetv')) {
+    test(library + ': absent view settings use the source-backed first-click defaults without writing storage', async () => {
+        const h = createHarness({ library, prefixes: ['KA', 'MA'] });
+        h.storage.delete(h.settingsKey);
+        h.storage.set('active-user-libraryPageSize', '0');
+        h.init();
+        assert.equal(h.clickPicker('K').prevented, true);
+        await turn();
+        assert.equal(h.settings.Alphabet, null);
+        assert.equal(h.storage.has(h.settingsKey), false);
+        assert.equal(h.scrollCalls.length, 1);
+        assertNoPersistentAlphaJumpMarker(h);
+        h.api.destroy();
+    });
+}
 
 for (const library of ['movies', 'series']) {
     test(library + ': first navigation arms after external toolbar count settles', async () => {
@@ -652,7 +790,8 @@ test('zero preference can own clicks but cannot declare partial cards ready', ()
 test('plugin mode validates a route-specific config before enabling automatic pagination setup', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 1,
+        contractVersion: 2,
+        scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
         libraryEnabled: true,
@@ -672,7 +811,8 @@ test('plugin mode validates a route-specific config before enabling automatic pa
 test('plugin config load failure does not fall back to standalone defaults or intercept clicks', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 1,
+        contractVersion: 2,
+        scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
         libraryEnabled: true,
@@ -691,7 +831,8 @@ test('plugin config load failure does not fall back to standalone defaults or in
 test('plugin mode retries a temporarily unavailable ApiClient and arms when it appears', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 1,
+        contractVersion: 2,
+        scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
         libraryEnabled: true,
@@ -712,7 +853,8 @@ test('plugin mode retries a temporarily unavailable ApiClient and arms when it a
 
 test('plugin config rejects a different normalized library ID', async () => {
     const configuration = {
-        contractVersion: 1,
+        contractVersion: 2,
+        scope: 'library',
         libraryId: 'fedcba98-7654-3210-fedc-ba9876543210',
         enabled: true,
         libraryEnabled: true,
@@ -729,7 +871,7 @@ test('plugin config rejects a different normalized library ID', async () => {
 
 test('plugin runtime recovery ignores unchanged code and reloads a safe changed fingerprint once', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'new', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, playbackExposed: true });
     h.init(); await turn();
@@ -746,7 +888,7 @@ test('plugin runtime recovery ignores unchanged code and reloads a safe changed 
 
 test('a runtime response resolving after destroy or reinjection cannot show an update notice or reload', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     let resolveOld;
     const runtime = {
         initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
@@ -767,7 +909,7 @@ test('a runtime response resolving after destroy or reinjection cannot show an u
 
 test('an unabortable runtime timeout remains outstanding instead of overlapping a second request', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     let resolveResponse;
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: new Promise(resolve => { resolveResponse = resolve; }) };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime });
@@ -787,7 +929,7 @@ for (const [label, fingerprint, expectedReloads] of [
 ]) {
     test('restart recovery continues past an old runtime response and applies a ' + label, async () => {
         const routeLibraryId = '0123456789abcdef0123456789abcdef';
-        const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+        const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
         const runtime = {
             initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
             responses: [
@@ -811,7 +953,7 @@ for (const [label, fingerprint, expectedReloads] of [
 
 test('delayed and replaced ApiClient instances subscribe once and clean up restart recovery', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'old', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, apiAvailable: false });
     h.init(); await turn();
@@ -831,13 +973,13 @@ test('delayed and replaced ApiClient instances subscribe once and clean up resta
 for (const library of ['movies', 'series']) {
     test(library + ': absent view settings use native defaults on the very first click without writing storage', async () => {
         const h = createHarness({ library, prefixes: ['KA', 'MA'] });
-        h.storage.delete(library + ' - library');
+        h.storage.delete(h.settingsKey);
         h.storage.set('active-user-libraryPageSize', '0');
         h.init();
         assert.equal(h.clickPicker('K').prevented, true);
         await turn();
         assert.equal(h.settings.Alphabet, null);
-        assert.equal(h.storage.has(library + ' - library'), false);
+        assert.equal(h.storage.has(h.settingsKey), false);
         assert.equal(h.scrollCalls.length, 1);
         assertNoPersistentAlphaJumpMarker(h);
         h.api.destroy();

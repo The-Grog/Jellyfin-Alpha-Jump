@@ -19,9 +19,16 @@
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
                             <input id="AutoEnableNewSupportedLibraries" type="checkbox" is="emby-checkbox" />
-                            <span>Enable newly discovered Movies and Shows libraries</span>
+                            <span>Enable newly discovered compatible libraries</span>
                         </label>
                         <div class="fieldDescription">Does not change existing explicit selections.</div>
+                    </div>
+                    <div class="checkboxContainer checkboxContainer-withDescription">
+                        <label class="emby-checkbox-label">
+                            <input id="BuiltInCollectionsEnabled" type="checkbox" is="emby-checkbox" />
+                            <span>Enable built-in Collections</span>
+                        </label>
+                        <div class="fieldDescription">Collections is a Jellyfin-provided view, not a media folder. It has its own explicit setting and no fabricated library ID.</div>
                     </div>
                     <div class="checkboxContainer checkboxContainer-withDescription">
                         <label class="emby-checkbox-label">
@@ -44,7 +51,7 @@
                     </div>
 
                     <h2 class="sectionTitle">Libraries</h2>
-                    <p class="fieldDescription">Movies and Shows can be enabled individually. Other library types are shown for clarity but cannot be enabled.</p>
+                    <p class="fieldDescription">Compatible library grids can be enabled individually. Live TV and views without a verified alphabet-picker grid remain disabled.</p>
                     <div id="AlphaJumpLibraries" class="verticalSection"></div>
                     <div id="AlphaJumpStatus" class="fieldDescription" role="status" aria-live="polite"></div>
                     <div>
@@ -109,7 +116,7 @@
                     });
                 }
                 function fill(configuration) {
-                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
+                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'BuiltInCollectionsEnabled', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
                         var camel = name.charAt(0).toLowerCase() + name.slice(1);
                         field(name).checked = configuration[name] !== undefined ? configuration[name] : configuration[camel] !== false;
                     });
@@ -134,7 +141,7 @@
                     event.preventDefault();
                     Dashboard.showLoadingMsg();
                     var configuration = {};
-                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
+                    ['Enabled', 'AutoEnableNewSupportedLibraries', 'BuiltInCollectionsEnabled', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
                         configuration[name] = field(name).checked;
                     });
                     configuration.LibrarySelections = [];

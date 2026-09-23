@@ -17,6 +17,36 @@ Run one milestone at a time. Completion of a prompt does not authorize the next 
 | 3. Browser validation and hardening | Started; automatic preference behavior untested | Authorized Jellyfin 12.1 testing observed 1,538 toolbar results and 1,538 Movie cards with no pager, while the old Injector copy saw no unprefixed key and let A use native filtering. The local correction and automatic setup/restore paths pass deterministic tests; served automatic reload, request inspection, performance, and coexistence remain open. |
 | 4. Reviewable first distribution | Release infrastructure prepared; first tag not published | Root manifest, CI, tag-release workflow, minimal-DLL packaging, checksum, and manifest-update flow are locally reviewed. No real tag, release, installation, or restart was performed. |
 
+## Expanded compatible-library scope — 2026-09-23
+
+The initial Movies/Shows-only browser registry is superseded by a narrower
+source-backed multi-library registry. It supports the tested 12.1 grids for
+Movies, Shows, Books/Audiobooks, built-in Collections, Home Videos (including
+its photo tabs), Mixed, Music albums, Music Videos, and top-level Playlists.
+It remains grid-only, ascending `SortName` only, with explicit `StartIndex: 0`
+and a complete renderer-owned allowed-card count. The registry excludes Live
+TV, standalone Photos (the pinned source labels its page unused), detail pages,
+song lists, suggestions, genres, people, artists/authors, episodes/upcoming,
+and embedded playlists. These exclusions retain native Jellyfin behavior.
+
+Plugin discovery now displays every valid virtual folder, creates persisted
+selections only for types with a source-backed registry route, and shows the
+rest disabled with an explanation. The built-in Collections view uses an
+explicit separate setting rather than a fabricated virtual-folder ID. Folder
+types—not names—decide whether a downloaded YouTube library can be selected.
+Empty/`unknown` collection types map to Mixed only as established by pinned
+Web source. This is local source/test evidence only; no server installation,
+restart, or live browser test is implied. The support matrix and browser
+validation checklist are in `README.md`, `docs/architecture.md`, and
+`docs/testing.md`.
+
+Final local validation on 2026-09-23: JavaScript syntax passed; Node
+production-path suite **88/88**; Release C# suite **24/24**; release ABI
+metadata validation passed for 12.1.0.0; and `git diff --check` passed. The
+Release production build succeeded with one `NU1900` vulnerability-data warning
+because this environment could not reach NuGet. No live-server/browser result
+is claimed.
+
 ## 2026-09-20 revised prototype decision
 
 The prior Previous/Next page scan is preserved as historical evidence only. The accepted local experiment instead requires the user to set **Library page size = 0** manually, allows Jellyfin Web to load/render the full currently constrained Movies result, then scrolls to the first matching rendered `data-prefix`. This neither changes server/user preferences nor adds fetching, virtualization, React hooks, API interception, packaging, or deployment.

@@ -60,22 +60,42 @@ public sealed class AlphaJumpController : ControllerBase
     }
 
     /// <summary>
-    /// Returns only the configuration for the caller's requested library ID.
+    /// Returns only the configuration for the caller's requested library ID or
+    /// Jellyfin's built-in Collections route.
     /// Jellyfin's authenticated API client supplies the credential; this endpoint
     /// deliberately returns no library names or inventory.
     /// </summary>
     [Authorize]
     [HttpGet("client-config")]
     [Produces(MediaTypeNames.Application.Json)]
-    public ActionResult<ClientConfigurationDto> GetClientConfiguration([FromQuery] Guid libraryId)
+    public ActionResult<ClientConfigurationDto> GetClientConfiguration([FromQuery] Guid? libraryId, [FromQuery] string? scope)
     {
         try
         {
-            var configuration = _configurationService.GetClientConfiguration(libraryId);
+            ClientLibraryConfiguration configuration;
+            string responseScope;
+            string? responseLibraryId;
+            if (string.Equals(scope, "collections", StringComparison.OrdinalIgnoreCase) && !libraryId.HasValue)
+            {
+                configuration = _configurationService.GetBuiltInCollectionsConfiguration();
+                responseScope = "collections";
+                responseLibraryId = null;
+            }
+            else if (string.IsNullOrEmpty(scope) && libraryId.HasValue)
+            {
+                configuration = _configurationService.GetClientConfiguration(libraryId.Value);
+                responseScope = "library";
+                responseLibraryId = LibraryId.Normalize(libraryId.Value);
+            }
+            else
+            {
+                return BadRequest();
+            }
             Response.Headers.CacheControl = "no-store";
             return Ok(new ClientConfigurationDto(
-                ContractVersion: 1,
-                LibraryId: LibraryId.Normalize(libraryId),
+                ContractVersion: 2,
+                Scope: responseScope,
+                LibraryId: responseLibraryId,
                 Enabled: configuration.Enabled,
                 LibraryEnabled: configuration.LibraryEnabled,
                 AutoDisablePagination: configuration.AutoDisablePagination,
@@ -130,7 +150,8 @@ public sealed class AlphaJumpController : ControllerBase
 /// </summary>
 public sealed record ClientConfigurationDto(
     int ContractVersion,
-    string LibraryId,
+    string Scope,
+    string? LibraryId,
     bool Enabled,
     bool LibraryEnabled,
     bool AutoDisablePagination,

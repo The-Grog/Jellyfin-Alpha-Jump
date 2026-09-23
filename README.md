@@ -1,7 +1,7 @@
 # Alpha Jump for Jellyfin
 
 Alpha Jump is an installable Jellyfin 12 plugin for Jellyfin Web. In supported
-Movies and Shows libraries, it changes the native alphabet picker from letter
+library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
 retaining the complete rendered library.
 
@@ -16,7 +16,7 @@ its normal filtering behavior.
 
 ## What Alpha Jump does
 
-- Supports modern Jellyfin Web **Movies** and **Shows** main library tabs.
+- Supports only the explicit modern Jellyfin Web grids in the matrix below.
 - Scrolls to the first card whose rendered `data-prefix` begins with the chosen
   alphabet letter instead of applying Jellyfin's alphabet filter.
 - Keeps non-alphabet filters and search constraints intact.
@@ -27,7 +27,7 @@ its normal filtering behavior.
 
 Alpha Jump targets Jellyfin **12.x**, with behavior developed against Jellyfin
 Web 12.1. It needs Grid view, ascending Name/SortName, and a persisted
-`StartIndex` of zero in the supported Movies or Shows main tab.
+`StartIndex` of zero in a supported grid/tab.
 
 The plugin configures the signed-in user's browser-local **Library page size**
 to `0` when that option is enabled. Jellyfin treats zero as unpaginated mode,
@@ -37,6 +37,38 @@ significant browser and performance implications for large libraries.
 If JellyTweaks controls Library Page Size, set its Library Page Size to `0` or
 disable JellyTweaks/all tweaks. A conflicting JellyTweaks page size can undo
 Alpha Jump's pagination setup after reload.
+
+## Library and tab support
+
+This matrix is backed by the pinned Jellyfin Web 12.1 source and deterministic
+tests. It is **not** live-browser compatibility confirmation yet. All entries
+still require grid layout, ascending `SortName`, explicit `StartIndex: 0`, one
+native picker, and a complete matching rendered-card result.
+
+| Library/view | Supported tabs | Rendered card types |
+| --- | --- | --- |
+| Movies | Movies, Favorites, Collections | `Movie`, `BoxSet` |
+| Shows | Series, Collections | `Series`, `BoxSet` |
+| Books / Audiobooks | Folders, Books, Collections, Favorites | `Folder`, `AudioBook`, `Book`, `BoxSet` |
+| Built-in Collections | Collections, Favorites | `BoxSet` |
+| Home Videos / Photos | Folders, Photos, Photo Albums, Videos | `Folder`, `Photo`, `PhotoAlbum`, `Video` |
+| Mixed libraries | Folders, Mixed, Collections | `Folder`, `Movie`, `Series`, `BoxSet` |
+| Music | Albums, Collections | `MusicAlbum`, `BoxSet` |
+| Music Videos | Folders, Music Videos | `Folder`, `MusicVideo` |
+| Playlists | Playlists, Favorites | `Playlist` |
+
+Downloaded YouTube videos are supported only by their configured Jellyfin
+collection type (for example Home Videos, Mixed, Movies, or Music Videos),
+never by matching a library's display name. Empty or `unknown` folder types
+are treated as Mixed only because Jellyfin Web 12.1 maps those types to its
+`#/mixed` page.
+
+Live TV and standalone Photos libraries are always native: pinned 12.1 source
+marks `photosPage` unused, while the supported photo grids are the tabs of a
+Home Videos library. Suggestions, genres, studios/networks, people,
+authors/artists, songs, episodes/upcoming, media-library embedded playlists,
+and item/collection detail pages are intentionally native too. Unknown types,
+layouts, sorts, DOM shapes, and card types fail closed.
 
 ## Installation
 
@@ -69,10 +101,14 @@ Repository installation is preferred because it supports updates.
 The Alpha Jump settings page provides:
 
 - **Enable Alpha Jump** — global injection switch.
-- **Enable newly discovered Movies and Shows libraries** — applied once when a
+- **Enable newly discovered compatible libraries** — applied once when a
   supported library is first discovered; it does not rewrite saved selections.
-- Per-library enablement for Movies and Shows. Unsupported libraries are shown
-  disabled with an explanation.
+- **Enable built-in Collections** — a separate opt-in because Collections is a
+  Jellyfin-provided view, not a media folder with a fabricated ID.
+- Per-library enablement for every discovered folder. Incompatible folders,
+  including standalone Photos, are shown disabled with an explanation. Live TV
+  is shown as a non-selectable built-in status row because it is not a virtual
+  folder and has no fabricated ID.
 - **Set the active browser user's library page size to zero** — browser-local
   unpaginated setup; enabled by default.
 - **Smooth scroll** and **Enable browser debug logging**.
@@ -114,10 +150,11 @@ it cannot overlap a second request.
 
 The enhancement itself is intentionally inert unless all of these are true:
 
-- Modern Movies (`#/movies`, `#moviesPage`) or Shows (`#/tv`, `#tvshowsPage`) main tab with one native alphabet picker. Episodes, suggestions, and other tabs remain native.
+- One supported route/tab from the support matrix with its matching page ID,
+  exact rendered card types, and one native alphabet picker.
 - Grid view, `SortBy: ["SortName"]`, and ascending sort.
-- Persisted Movies/Series `StartIndex` is explicitly `0`.
-- The numeric toolbar total exactly equals the number of rendered Movie cards.
+- Persisted view `StartIndex` is explicitly `0`.
+- The numeric toolbar total exactly equals the number of rendered allowed cards.
 
 Jellyfin Web v12.1 documents that zero disables pagination and warns that zero
 (or values above 100) may cause bugs and reduced performance. Automatic setup
@@ -190,7 +227,7 @@ It has a native Jellyfin dashboard configuration page with these defaults:
 
 - Global enhancement enabled; newly discovered supported libraries enabled.
 - Explicit per-library settings are XML-compatible records keyed only by a normalized stable collection-folder GUID, so renamed libraries retain their setting and deleted ones are harmless.
-- Discovery persists one record for each supported library before any dashboard visit. Existing supported libraries initially follow the default; later policy changes affect only libraries discovered afterward. Unsupported libraries are displayed disabled with an explanation.
+- Discovery persists one record for each supported collection type before any dashboard visit. Existing supported libraries initially follow the default; later policy changes affect only libraries discovered afterward. Every discovered folder is shown; unsupported folders are disabled with an explanation. The built-in Collections view has a separate persisted opt-in because it has no virtual-folder GUID.
 - Auto-disable pagination and smooth scrolling are enabled; debug logging is disabled.
 
 The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin's `ILibraryManager`, which synchronizes discovery and administrator writes under one lock. Its per-library checkboxes reflect their saved choices even when the global switch is temporarily off, so re-enabling cannot erase them. The injected browser code requests only an authenticated, per-library configuration response; it receives no library inventory. IDs are normalized to Jellyfin Web's unhyphenated GUID form at the server, dashboard, and browser boundaries. An unavailable or malformed response leaves the native picker alone rather than using standalone defaults; an early missing public `ApiClient` is retried for a small bounded startup window.
@@ -199,7 +236,7 @@ The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin
 
 On 2026-09-21 this host built the production project with .NET SDK `10.0.401` (zero warnings) and ran the C# suite successfully (9 passed). Served Jellyfin validation still requires a separately approved disposable-server test.
 
-To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Music, books, photos, mixed libraries, and all native clients remain outside this initial support scope.
+To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Native clients remain outside this browser-only scope.
 
 ## Development and troubleshooting: temporary console trial
 
@@ -243,10 +280,11 @@ These are implementation records, not a compatibility claim.
 | Correct preference key is user-local | `userSettings.libraryPageSize()` calls `set('libraryPageSize', value, false)`. That calls `appSettings.set(name, value, currentUserId)`, whose key format is `<userId>-<name>`. The current user comes from public `window.ApiClient.getCurrentUserId()`. |
 | Start index still matters | The v12.1 item request continues to send `StartIndex`. The script requires explicit persisted `StartIndex: 0`, so it cannot mistake an unpaginated suffix for the full constrained library. |
 | Unprefixed storage was a historical mistake | The served session had no unprefixed `libraryPageSize`, which correctly exposed the old implementation defect. v12.1 source shows that the correct active-user key is prefixed; this prototype now reads/writes only that key and preserves a scoped backup. |
-| Small results are resolved by equality, not a threshold | A toolbar total equal to the rendered Movie-card count proves that current result is complete, including <=100 results. A large number by itself proves nothing. An active native alphabet remains fail-closed until the same alphabet-clear query was previously confirmed. |
+| Small results are resolved by equality, not a threshold | A toolbar total equal to the rendered allowed-card count proves that current result is complete, including <=100 results. A large number by itself proves nothing. An active native alphabet remains fail-closed until the same alphabet-clear query was previously confirmed. |
 | Readiness is a render-state question | `ItemsView` shows Loading while its result is pending, then Cards or `NoItemsMessage`. An empty DOM or cleared native alphabet button by itself is insufficient. |
 | Native alphabet state remains Jellyfin-owned | The existing MUI ToggleButton deselects to `null`. Alpha Jump allows only that native clear click through when needed, then uses letters as stateless jump commands without changing native `aria-pressed`, adding `aria-current`, or leaving a custom marker. |
-| Card prefix is the match surface | Movie card wrappers expose `data-prefix`; matching uses literal `startsWith(letter)`, not equality or an unverified ordering shortcut. |
+| Card prefix and type are the match surface | Supported card wrappers expose `data-prefix` and a source-defined `data-type`; matching uses literal `startsWith(letter)`, not equality or an unverified ordering shortcut. A heterogeneous grid is accepted only when every card has an allowed type and usable prefix. |
+| Multi-library support is registry-bound | The script has an explicit v12.1 route/tab/settings/card-type registry. It does not broaden itself to every visible card; unavailable tabs and Live TV retain native behavior. |
 | The former page scan is historical | The earlier Previous/Next experiment proved visible replacing pages cannot yield Plex-style continuous scrolling. This design removes its pager machinery in favour of v12.1's native zero-page-size path. |
 | Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it still arms only after the current result's toolbar/card equality and other view gates succeed. |
 | Jellyfin Enhanced remains a compatibility risk | With Jellyfin Enhanced active, an earlier zero-page-size observation exposed a virtualized region reporting `showing 0-500 of 4609 items` while the toolbar reported 1,538. The prototype only inspects rendered cards, so it cannot yet claim a complete constrained-query scan or acceptable performance under that plugin. |
@@ -255,7 +293,7 @@ The target browser still has to validate served-DOM selectors, keyboard/capture 
 
 ## Limits
 
-- Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including non-Movies library views. Its performance on the target roughly 1,500-title library is **not yet tested**.
+- Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including supported non-Movie library views. Its performance on the target roughly 1,500-title library is **not yet tested**.
 - Source inspection supports the selectors and readiness model, but a served page must still prove event interception, request parameters, loading behavior, sticky-header positioning, and Jellyfin Enhanced coexistence.
 - Sort-name/card-prefix collation for custom titles, punctuation, accents, and non-Latin titles is not claimed beyond the literal prefix values the page renders.
 - A controlled served-server installation and full browser compatibility test
@@ -265,6 +303,6 @@ The previous sequential native-page scan is retained as historical evidence in [
 
 ## Shows support
 
-Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. Set `showsEnabled: false` or `moviesOnly: true` to retain Movies-only behavior. Source and local regression tests verify the hooks; Shows has not yet been tested in the live browser.
+Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. In standalone injection, set `showsEnabled: false` to leave Shows native; set `moviesOnly: true` to limit Alpha Jump to the original Movies main grid and leave all expanded views native. Source and local regression tests verify the hooks; Shows has not yet been tested in the live browser.
 
 For testing, replace the existing Injector entry with the updated source, save, and fully reload. Open Shows, select its main Shows tab, use Name ascending/grid, and clear native alphabet filtering. Try A, M, Z, then #, and verify all shows remain scrollable. Navigate Movies → Shows → Movies and verify both pickers. Episodes and other TV tabs should retain native behavior.

@@ -15,6 +15,7 @@ public class LibrarySelectionTests
         var defaults = RoundTrip(new PluginConfiguration());
         Assert.True(defaults.Enabled);
         Assert.True(defaults.AutoEnableNewSupportedLibraries);
+        Assert.True(defaults.BuiltInCollectionsEnabled);
         Assert.True(defaults.AutoDisablePagination);
         Assert.True(defaults.SmoothScroll);
         Assert.False(defaults.Debug);
@@ -24,6 +25,7 @@ public class LibrarySelectionTests
         var disabled = Guid.Parse("fedcba98-7654-3210-fedc-ba9876543210");
         var configuration = RoundTrip(new PluginConfiguration
         {
+            BuiltInCollectionsEnabled = false,
             LibrarySelections =
             [
                 new LibrarySelectionRecord { LibraryId = LibraryId.Normalize(enabled), Enabled = true },
@@ -33,6 +35,7 @@ public class LibrarySelectionTests
 
         Assert.True(LibrarySelection.IsEnabled(configuration, enabled));
         Assert.False(LibrarySelection.IsEnabled(configuration, disabled));
+        Assert.False(configuration.BuiltInCollectionsEnabled);
         configuration.Enabled = false;
         Assert.False(LibrarySelection.IsEnabled(configuration, enabled));
         Assert.True(LibrarySelection.IsSelectionEnabled(configuration, enabled));
@@ -52,7 +55,7 @@ public class LibrarySelectionTests
 
         Assert.True(LibraryDiscoverySynchronizer.Synchronize(configuration, initial));
         Assert.True(LibrarySelection.IsEnabled(configuration, existing));
-        Assert.Single(configuration.LibrarySelections);
+        Assert.Equal(2, configuration.LibrarySelections.Count);
 
         configuration.AutoEnableNewSupportedLibraries = false;
         Assert.True(LibraryDiscoverySynchronizer.Synchronize(configuration,
@@ -89,6 +92,56 @@ public class LibrarySelectionTests
         Assert.NotEqual(routeId, other);
     }
 
+    [Theory]
+    [InlineData("books")]
+    [InlineData("boxsets")]
+    [InlineData("homevideos")]
+    [InlineData("mixed")]
+    [InlineData("movies")]
+    [InlineData("music")]
+    [InlineData("musicvideos")]
+    [InlineData("playlists")]
+    [InlineData("tvshows")]
+    [InlineData("")]
+    [InlineData("unknown")]
+    public void SourceBackedLibraryTypesAreSelectable(string collectionType)
+    {
+        var descriptor = new LibraryDescriptor(Guid.NewGuid(), "A library", collectionType);
+
+        Assert.True(descriptor.IsSupported);
+        if (string.IsNullOrEmpty(collectionType) || collectionType == "unknown")
+        {
+            Assert.Equal("mixed", descriptor.EffectiveCollectionType);
+        }
+    }
+
+    [Fact]
+    public void LiveTvAndUnknownLibraryTypesRemainDisabled()
+    {
+        var liveTv = new LibraryDescriptor(Guid.NewGuid(), "Live TV", "livetv");
+        var unsupported = new LibraryDescriptor(Guid.NewGuid(), "Other", "games");
+
+        Assert.False(liveTv.IsSupported);
+        Assert.Contains("Live TV", liveTv.UnsupportedReason);
+        Assert.False(unsupported.IsSupported);
+        Assert.NotNull(unsupported.UnsupportedReason);
+    }
+
+    [Fact]
+    public void AdministratorConfigurationShowsBuiltInLiveTvDisabledWithoutAnInventedId()
+    {
+        var configuration = new PluginConfiguration();
+        var response = AlphaJumpConfigurationService.ToAdministratorConfiguration(
+            configuration,
+            [new LibraryDescriptor(Guid.NewGuid(), "Movies", "movies")]);
+
+        var liveTv = Assert.Single(response.Libraries, library => library.CollectionType == "livetv");
+        Assert.Equal(string.Empty, liveTv.LibraryId);
+        Assert.False(liveTv.Supported);
+        Assert.False(liveTv.Enabled);
+        Assert.Contains("intentionally unsupported", liveTv.Explanation);
+    }
+
     [Fact]
     public void DiscoveryUsesVirtualFoldersAndSkipsInvalidFolderIds()
     {
@@ -98,6 +151,8 @@ public class LibrarySelectionTests
         proxy.VirtualFolders =
         [
             new VirtualFolderInfo { ItemId = movieId.ToString("D"), Name = "Movies", CollectionType = CollectionTypeOptions.movies },
+            new VirtualFolderInfo { ItemId = Guid.NewGuid().ToString("D"), Name = "Books", CollectionType = CollectionTypeOptions.books },
+            new VirtualFolderInfo { ItemId = Guid.NewGuid().ToString("D"), Name = "YouTube downloads", CollectionType = CollectionTypeOptions.homevideos },
             new VirtualFolderInfo { ItemId = "not-a-guid", Name = "Broken", CollectionType = CollectionTypeOptions.movies },
             new VirtualFolderInfo { ItemId = null, Name = "Missing", CollectionType = CollectionTypeOptions.tvshows }
         ];
@@ -105,10 +160,13 @@ public class LibrarySelectionTests
 
         var libraries = LibraryDiscovery.Discover(libraryManager, skipped.Add);
 
-        var library = Assert.Single(libraries);
+        Assert.Equal(3, libraries.Count);
+        var library = Assert.Single(libraries, candidate => candidate.Id == movieId);
         Assert.Equal(movieId, library.Id);
         Assert.Equal("Movies", library.Name);
         Assert.Equal("movies", library.CollectionType);
+        Assert.Contains(libraries, candidate => candidate.CollectionType == "books" && candidate.IsSupported);
+        Assert.Contains(libraries, candidate => candidate.CollectionType == "homevideos" && candidate.IsSupported);
         Assert.Equal(1, proxy.GetVirtualFoldersCalls);
         Assert.Equal(0, proxy.RootFolderAccesses);
         Assert.Equal(["not-a-guid", "<null>"], skipped);
