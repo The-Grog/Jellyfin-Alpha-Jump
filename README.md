@@ -79,6 +79,21 @@ nonzero page size after Alpha Jump reloads.
 
 Library choices use stable Jellyfin library IDs, so they survive a rename.
 
+## Update recovery
+
+The first installation still needs a manual browser refresh, and the first
+upgrade that adds this recovery mechanism needs one too. Later upgrades with a
+changed Alpha Jump script use a fingerprinted script URL and can prompt an
+already-open tab to refresh after Jellyfin restarts. An unchanged script after
+an ordinary restart does not request a refresh.
+
+Alpha Jump reloads automatically only when it can positively establish a
+visible supported library screen and inactive playback. Jellyfin Web 12.1 keeps
+its playback manager module-scoped, so installations that do not explicitly
+expose that verified API receive the accessible **Alpha Jump updated—refresh to
+apply** action instead. This intentionally avoids interrupting playback or
+dashboard editing.
+
 ## Safety conditions
 
 The enhancement itself is intentionally inert unless all of these are true:

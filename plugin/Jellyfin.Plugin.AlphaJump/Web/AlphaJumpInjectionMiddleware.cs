@@ -13,14 +13,19 @@ public sealed class AlphaJumpInjectionMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IAlphaJumpConfigurationService _configurationService;
+    private readonly IAlphaJumpRuntimeInfo _runtimeInfo;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AlphaJumpInjectionMiddleware"/> class.
     /// </summary>
-    public AlphaJumpInjectionMiddleware(RequestDelegate next, IAlphaJumpConfigurationService configurationService)
+    public AlphaJumpInjectionMiddleware(
+        RequestDelegate next,
+        IAlphaJumpConfigurationService configurationService,
+        IAlphaJumpRuntimeInfo runtimeInfo)
     {
         _next = next;
         _configurationService = configurationService;
+        _runtimeInfo = runtimeInfo;
     }
 
     /// <summary>
@@ -64,7 +69,7 @@ public sealed class AlphaJumpInjectionMiddleware
 
             using var reader = new StreamReader(buffer, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, leaveOpen: true);
             var html = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
-            if (!AlphaJumpInjection.TryInject(html, injectionBasePath, out var transformed))
+            if (!AlphaJumpInjection.TryInject(html, injectionBasePath, _runtimeInfo, out var transformed))
             {
                 buffer.Position = 0;
                 await buffer.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);

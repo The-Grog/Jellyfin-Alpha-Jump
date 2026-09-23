@@ -39,7 +39,10 @@
         // Plugin injection can run before Jellyfin publishes ApiClient. Retry
         // that public readiness boundary briefly without polling indefinitely.
         maxPluginApiRetries: 8,
-        pluginApiRetryDelayMs: 250
+        pluginApiRetryDelayMs: 250,
+        updateCheckThrottleMs: 10000,
+        updateRequestTimeoutMs: 5000,
+        updateRetryDelaysMs: [1000, 3000, 8000]
     };
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
@@ -78,7 +81,8 @@
             pending: null,
             failedLibraries: new Set(),
             readinessRetry: null,
-            readinessFailureReported: new Set()
+            readinessFailureReported: new Set(),
+            update: { initial: null, pending: null, request: null, retry: null, retries: 0, lastCheck: 0, notice: null, unsubscribe: null, focus: null, visibility: null }
         }
     };
 
@@ -95,7 +99,111 @@
             .filter(marker => marker.getAttribute?.('data-alpha-jump-mode') === 'plugin');
         if (markers.length !== 1) return null;
         const configUrl = markers[0].getAttribute('data-alpha-jump-config-url');
-        return typeof configUrl === 'string' && configUrl ? { element: markers[0], configUrl } : null;
+        if (typeof configUrl !== 'string' || !configUrl) return null;
+        const runtimeUrl = markers[0].getAttribute('data-alpha-jump-runtime-url');
+        const runtimeId = markers[0].getAttribute('data-alpha-jump-runtime-id');
+        const fingerprint = markers[0].getAttribute('data-alpha-jump-script-fingerprint');
+        return { element: markers[0], configUrl, runtime: typeof runtimeUrl === 'string' && runtimeUrl && runtimeId && fingerprint ? { url: runtimeUrl, runtimeId, fingerprint } : null };
+    }
+
+    function validRuntime(value) {
+        return value && typeof value === 'object'
+            && typeof pluginValue(value, 'runtimeId') === 'string'
+            && /^[a-f0-9]{16,}$/i.test(pluginValue(value, 'scriptFingerprint'))
+            && typeof pluginValue(value, 'pluginVersion') === 'string'
+            ? { runtimeId: pluginValue(value, 'runtimeId'), fingerprint: pluginValue(value, 'scriptFingerprint'), version: pluginValue(value, 'pluginVersion') }
+            : null;
+    }
+
+    function updateNotice(message) {
+        const update = state.plugin.update;
+        if (!update.notice?.isConnected) {
+            const notice = doc.createElement('div');
+            notice.className = 'alpha-jump-update-notice';
+            notice.setAttribute('role', 'status');
+            notice.setAttribute('aria-live', 'polite');
+            notice.style.cssText = 'position:fixed;right:1rem;bottom:1rem;z-index:1201;padding:.5rem .75rem;background:var(--theme-background,rgba(0,0,0,.85));color:inherit;border-radius:.25rem;';
+            doc.body?.appendChild(notice);
+            update.notice = notice;
+        }
+        update.notice.replaceChildren(doc.createTextNode(message));
+        const button = doc.createElement('button');
+        button.type = 'button'; button.textContent = 'Refresh'; button.style.cssText = 'margin-left:.5rem;';
+        button.addEventListener('click', () => root.location.reload());
+        update.notice.appendChild(button);
+    }
+
+    function updateSafeToReload() {
+        if (doc.visibilityState && doc.visibilityState !== 'visible') return false;
+        const context = getContext();
+        // v12.1 exports playbackManager as an ES module, not a documented window API.
+        // Only reload automatically when a host explicitly exposes its verified shape.
+        const playback = root.playbackManager;
+        if (!playback || typeof playback.isPlayingLocally !== 'function') return false;
+        try { return !!context && isPotentiallySupported(context) && !playback.isPlayingLocally(['Video', 'Audio', 'Book']); }
+        catch { return false; }
+    }
+
+    function updateReloadKey(fingerprint) { return originKey() ? `alpha-jump:v1:update-reload:${originKey()}:${fingerprint}` : null; }
+
+    function applyPendingUpdate() {
+        const update = state.plugin.update;
+        if (!update.pending) return;
+        if (!updateSafeToReload()) { updateNotice('Alpha Jump updated—refresh to apply.'); return; }
+        const key = updateReloadKey(update.pending.fingerprint);
+        try {
+            if (!key || root.sessionStorage?.getItem(key) === '1') { updateNotice('Alpha Jump updated—refresh to apply.'); return; }
+            root.sessionStorage?.setItem(key, '1');
+            root.location.reload();
+        } catch { updateNotice('Alpha Jump updated—refresh to apply.'); }
+    }
+
+    function scheduleUpdateRetry() {
+        const update = state.plugin.update;
+        if (state.destroyed || update.retry || update.retries >= CONFIG.updateRetryDelaysMs.length) return;
+        const delay = CONFIG.updateRetryDelaysMs[update.retries++];
+        update.retry = root.setTimeout(() => { update.retry = null; checkForPluginUpdate(true); }, delay);
+    }
+
+    function checkForPluginUpdate(force = false) {
+        const update = state.plugin.update;
+        if (!pluginMode() || !update.initial || update.request || (!force && Date.now() - update.lastCheck < CONFIG.updateCheckThrottleMs)) return;
+        const client = root.ApiClient;
+        if (!pluginClientIsReady(client)) { scheduleUpdateRetry(); return; }
+        update.lastCheck = Date.now();
+        let timeout;
+        const request = Promise.race([
+            client.ajax({ type: 'GET', url: update.initial.url, dataType: 'json', timeout: CONFIG.updateRequestTimeoutMs }),
+            new Promise((_, reject) => { timeout = root.setTimeout(() => reject(new Error('runtime request timeout')), CONFIG.updateRequestTimeoutMs); })
+        ]).then(payload => {
+            const runtime = validRuntime(payload);
+            if (!runtime) throw new Error('invalid runtime response');
+            update.retries = 0;
+            if (runtime.fingerprint !== update.initial.fingerprint) { update.pending = runtime; applyPendingUpdate(); }
+        }).catch(() => scheduleUpdateRetry()).finally(() => { if (timeout) root.clearTimeout(timeout); if (update.request === request) update.request = null; });
+        update.request = request;
+    }
+
+    function startUpdateRecovery() {
+        const marker = state.plugin.marker;
+        if (!marker?.runtime) return;
+        const update = state.plugin.update;
+        update.initial = marker.runtime;
+        update.focus = () => { checkForPluginUpdate(false); applyPendingUpdate(); };
+        update.visibility = () => { if (doc.visibilityState === 'visible') update.focus(); };
+        root.addEventListener('focus', update.focus);
+        doc.addEventListener('visibilitychange', update.visibility);
+        const client = root.ApiClient;
+        if (pluginClientIsReady(client) && typeof client.subscribe === 'function') {
+            try { update.unsubscribe = client.subscribe(['ServerRestarting', 'ServerShuttingDown'], () => scheduleUpdateRetry()); } catch { /* focus recovery remains available */ }
+        }
+    }
+
+    function stopUpdateRecovery() {
+        const update = state.plugin.update;
+        if (update.retry) root.clearTimeout(update.retry);
+        update.unsubscribe?.(); root.removeEventListener('focus', update.focus); doc.removeEventListener('visibilitychange', update.visibility);
+        update.notice?.remove(); update.retry = update.request = update.notice = update.unsubscribe = update.focus = update.visibility = null;
     }
 
     function pluginValue(payload, name) {
@@ -984,9 +1092,11 @@
         }
         if (!isPotentiallySupported(context)) {
             detachSurface(true);
+            applyPendingUpdate();
             return;
         }
         attachSurface(context);
+        applyPendingUpdate();
     }
 
     function scheduleLifecycle() {
@@ -1021,6 +1131,7 @@
         if (!CONFIG.enabled || !doc || state.destroyed) return;
         if (root[INSTANCE_KEY]?.destroy) root[INSTANCE_KEY].destroy('re-injected');
         state.plugin.marker = pluginMarker();
+        startUpdateRecovery();
         state.hashChange = () => {
             cancelRun('Cancelled: navigation changed.', false);
             scheduleLifecycle();
@@ -1066,6 +1177,7 @@
         state.destroyed = true;
         if (state.lifecycleFrame) root.cancelAnimationFrame(state.lifecycleFrame);
         clearPluginReadinessRetry();
+        stopUpdateRecovery();
         cancelRun(null, false);
         detachSurface(true);
         state.mountObserver?.disconnect();
@@ -1111,6 +1223,8 @@
         refreshSurface,
         execute,
         waitForReady,
+        checkForPluginUpdate,
+        applyPendingUpdate,
         getState: () => state
     };
     return { init, api, test };

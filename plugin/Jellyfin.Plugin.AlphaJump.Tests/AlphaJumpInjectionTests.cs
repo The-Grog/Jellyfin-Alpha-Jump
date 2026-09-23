@@ -53,7 +53,7 @@ public class AlphaJumpInjectionTests
             httpContext.Response.StatusCode = StatusCodes.Status200OK;
             httpContext.Response.ContentType = contentType;
             await httpContext.Response.WriteAsync(body);
-        }, new EnabledConfigurationService());
+        }, new EnabledConfigurationService(), Runtime());
 
         await middleware.Invoke(context);
         context.Response.Body.Position = 0;
@@ -62,6 +62,20 @@ public class AlphaJumpInjectionTests
     }
 
     private static string Html() => "<!doctype html><html><head><title>Jellyfin</title></head><body></body></html>";
+
+    [Fact]
+    public void RuntimeFingerprintIsStableForSameContentAndChangesScriptUrlForNewContent()
+    {
+        var first = AlphaJumpRuntimeInfo.Create([1, 2, 3], new Version(1, 0));
+        var same = AlphaJumpRuntimeInfo.Create([1, 2, 3], new Version(1, 0));
+        var changed = AlphaJumpRuntimeInfo.Create([1, 2, 4], new Version(1, 0));
+        Assert.Equal(first.ScriptFingerprint, same.ScriptFingerprint);
+        Assert.NotEqual(first.RuntimeId, same.RuntimeId);
+        Assert.NotEqual(first.ScriptFingerprint, changed.ScriptFingerprint);
+        Assert.Contains($"h={changed.ScriptFingerprint}", AlphaJumpInjection.BuildBootstrapMarkup("/jellyfin", changed));
+    }
+
+    private static IAlphaJumpRuntimeInfo Runtime() => AlphaJumpRuntimeInfo.Create([1, 2, 3], new Version(1, 0));
 
     private sealed class EnabledConfigurationService : IAlphaJumpConfigurationService
     {

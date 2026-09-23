@@ -1,5 +1,6 @@
 using System.Net.Mime;
 using Jellyfin.Plugin.AlphaJump.Configuration;
+using Jellyfin.Plugin.AlphaJump.Web;
 using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -16,11 +17,13 @@ namespace Jellyfin.Plugin.AlphaJump.Controllers;
 public sealed class AlphaJumpController : ControllerBase
 {
     private readonly IAlphaJumpConfigurationService _configurationService;
+    private readonly IAlphaJumpRuntimeInfo _runtimeInfo;
 
     /// <summary>Initializes a new instance of the controller.</summary>
-    public AlphaJumpController(IAlphaJumpConfigurationService configurationService)
+    public AlphaJumpController(IAlphaJumpConfigurationService configurationService, IAlphaJumpRuntimeInfo runtimeInfo)
     {
         _configurationService = configurationService;
+        _runtimeInfo = runtimeInfo;
     }
 
     /// <summary>
@@ -41,9 +44,19 @@ public sealed class AlphaJumpController : ControllerBase
         using (stream)
         using (var reader = new StreamReader(stream))
         {
-            Response.Headers.CacheControl = "public, max-age=3600";
+            Response.Headers.CacheControl = "public, max-age=31536000, immutable";
             return Content(reader.ReadToEnd(), "text/javascript; charset=utf-8");
         }
+    }
+
+    /// <summary>Returns only process and payload identity for update recovery.</summary>
+    [AllowAnonymous]
+    [HttpGet("runtime")]
+    [Produces(MediaTypeNames.Application.Json)]
+    public ActionResult<RuntimeInfoDto> GetRuntimeInfo()
+    {
+        Response.Headers.CacheControl = "no-store";
+        return Ok(new RuntimeInfoDto(_runtimeInfo.RuntimeId, _runtimeInfo.ScriptFingerprint, _runtimeInfo.PluginVersion));
     }
 
     /// <summary>
@@ -123,3 +136,6 @@ public sealed record ClientConfigurationDto(
     bool AutoDisablePagination,
     bool SmoothScroll,
     bool Debug);
+
+/// <summary>Minimal cache-busting and update-recovery contract.</summary>
+public sealed record RuntimeInfoDto(string RuntimeId, string ScriptFingerprint, string PluginVersion);

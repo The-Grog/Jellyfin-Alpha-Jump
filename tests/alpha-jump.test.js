@@ -89,7 +89,9 @@ function createHarness({
     loggedIn = true,
     apiAvailable = true,
     pluginConfiguration = null,
-    pluginConfigurationFailure = false
+    pluginConfigurationFailure = false,
+    runtime = null,
+    playbackExposed = false
 } = {}) {
     const shows = library === 'series';
     const pageId = shows ? 'tvshowsPage' : 'moviesPage';
@@ -156,6 +158,11 @@ function createHarness({
     if (pluginMarker) {
         pluginMarker.setAttribute('data-alpha-jump-mode', 'plugin');
         pluginMarker.setAttribute('data-alpha-jump-config-url', '/AlphaJump/client-config');
+        if (runtime) {
+            pluginMarker.setAttribute('data-alpha-jump-runtime-url', '/AlphaJump/runtime');
+            pluginMarker.setAttribute('data-alpha-jump-runtime-id', runtime.initial.runtimeId);
+            pluginMarker.setAttribute('data-alpha-jump-script-fingerprint', runtime.initial.fingerprint);
+        }
     }
     const sessionStorage = new Map();
     let reloads = 0;
@@ -165,12 +172,13 @@ function createHarness({
     const apiClient = {
         getCurrentUserId: () => activeUserId,
         isLoggedIn: () => isLoggedIn,
-        ajax: () => pluginConfigurationFailure
+        ajax: options => pluginConfigurationFailure
             ? Promise.reject(new Error('server unavailable'))
-            : Promise.resolve(pluginConfiguration)
+            : Promise.resolve(options.url === '/AlphaJump/runtime' ? runtime?.response : pluginConfiguration)
     };
     const root = {
         document,
+        playbackManager: playbackExposed ? { isPlayingLocally: () => false } : undefined,
         location: {
             hash: shows ? '#/tv?topParentId=' + routeLibraryId + '&collectionType=tvshows' : '#/movies?topParentId=' + routeLibraryId + '&collectionType=movies',
             origin: 'http://jellyfin.test',
@@ -695,6 +703,23 @@ test('plugin config rejects a different normalized library ID', async () => {
     await turn();
     assert.equal(h.pickerRoot.listeners.has('click'), false);
     h.api.destroy();
+});
+
+test('plugin runtime recovery ignores unchanged code and reloads a safe changed fingerprint once', async () => {
+    const routeLibraryId = '0123456789abcdef0123456789abcdef';
+    const configuration = { contractVersion: 1, libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'new', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
+    const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, playbackExposed: true });
+    h.init(); await turn();
+    h.test.checkForPluginUpdate(true); await turn();
+    assert.equal(h.reloads, 0);
+    runtime.response = { runtimeId: 'newer', scriptFingerprint: 'b'.repeat(64), pluginVersion: '0.2.1.0' };
+    h.test.checkForPluginUpdate(true); await turn();
+    assert.equal(h.reloads, 1);
+    const reinjected = createAlphaJump(h.root); reinjected.init(); await turn();
+    reinjected.test.checkForPluginUpdate(true); await turn();
+    assert.equal(h.reloads, 1);
+    reinjected.api.destroy();
 });
 
 for (const library of ['movies', 'series']) {

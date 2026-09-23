@@ -8,7 +8,19 @@ Browser/session: authorized Codex in-app browser (its Chromium version was not e
 
 The current code changes Alpha Jump from its earlier persistent-selection behavior to stateless, Plex-like commands: each `A`–`Z` activation repeats that letter's jump, no Alpha Jump marker or `aria-current` state remains, and only `#` returns to the beginning. The served-browser observations below predate this change and are retained as historical evidence only; **the new stateless behavior has not yet been run in a live browser**.
 
-Automated validation on 2026-09-22 passed `node --check src/alpha-jump.js` and **32/32** focused JavaScript tests. The added production-path checks cover repeated M clicks as independent intercepted jumps, `#` returning to top after a letter jump, absence of Alpha Jump marker/`aria-current` state across the picker, untouched native `aria-pressed`, latest-request-wins scrolling, query cancellation, and detach feedback/listener cleanup. `dotnet build` completed with 0 warnings/errors and `dotnet test` passed **10/10**. The added C# regression supplies 12.1 `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()`, verifies valid Movies mapping and invalid-ID skips, and throws if discovery reads `RootFolder`. These are local deterministic results, not browser validation.
+Automated validation on 2026-09-22 passed `node --check src/alpha-jump.js` and **33/33** focused JavaScript tests. The added production-path checks cover repeated M clicks as independent intercepted jumps, `#` returning to top after a letter jump, absence of Alpha Jump marker/`aria-current` state across the picker, untouched native `aria-pressed`, latest-request-wins scrolling, query cancellation, detach feedback/listener cleanup, and runtime update recovery. `dotnet build` completed with 0 warnings/errors and `dotnet test` passed **11/11**. The added C# regressions supply 12.1 `VirtualFolderInfo` values through `ILibraryManager.GetVirtualFolders()`, verify valid Movies mapping and invalid-ID skips, throw if discovery reads `RootFolder`, and verify runtime fingerprint/script URL behavior. These are local deterministic results, not browser validation.
+
+### Update-recovery implementation — 2026-09-22
+
+The plugin now exposes a no-store runtime identity containing a per-process ID,
+embedded-script SHA-256 fingerprint, and plugin version. Bootstrap script URLs
+carry that fingerprint. Server-side tests cover stable fingerprints for equal
+script bytes, changed fingerprints/URLs for changed bytes, and root/base-URL
+markup. Browser recovery is plugin-only and event/focus/visibility driven; it
+does not poll continuously. Jellyfin Web v12.1 source uses a module-scoped
+playback manager, so this implementation defers to a manual accessible refresh
+notice unless a host exposes the verified `isPlayingLocally` API. No served
+server/browser update-recovery run has been performed.
 
 ## Actually run
 
