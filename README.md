@@ -11,6 +11,7 @@ view. When its safety conditions are not met, the native alphabet picker keeps
 its normal filtering behavior.
 
 [![Listed on JellyWatch Hub](https://jellywatch.app/hub/jellyfin-alpha-jump/badge.svg)](https://jellywatch.app/hub/jellyfin-alpha-jump)
+
 [![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-0070ba?logo=paypal&logoColor=white)](https://paypal.me/machogrog)
 
 ## What Alpha Jump does
