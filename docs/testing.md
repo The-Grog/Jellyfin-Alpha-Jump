@@ -72,6 +72,12 @@ now SHA pinned; CodeQL and Dependabot configuration are source-controlled.
 Ruleset, Actions, secret-scanning, vulnerability-reporting, and immutable
 release settings require GitHub-hosted verification after this change is pushed.
 
+The first CodeQL C# baseline run exposed a workflow configuration defect: it
+initialized analysis but did not build the .NET projects, so CodeQL reported no
+C# source code. The follow-up workflow adds a pinned .NET setup action and an
+explicit Release build in manual CodeQL mode. Its GitHub-hosted result remains
+pending until the corrective pull request is merged.
+
 ## Actually run
 
 | Check | Result | Evidence |

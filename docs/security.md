@@ -24,8 +24,10 @@ plugin DLL users install.
   update PRs for GitHub Actions and NuGet; Jellyfin package changes require
   maintainer ABI review and are never auto-merged.
 - CodeQL scans C# and JavaScript/TypeScript on `main`, pull requests, and a
-  weekly schedule. Code-scanning findings are reviewed before making any
-  code-scanning rule a merge requirement.
+  weekly schedule. Its C# job builds the test project between initialization and
+  analysis so CodeQL can extract the server plugin sources. Code-scanning
+  findings are reviewed before making any code-scanning rule a merge
+  requirement.
 - Secret scanning and push protection are enabled in GitHub. Private
   vulnerability reporting is enabled; see [SECURITY.md](../SECURITY.md).
 
