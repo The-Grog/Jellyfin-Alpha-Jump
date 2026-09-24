@@ -16,14 +16,29 @@ class FakeElement {
         this.classList = {
             add: name => this.classNames.add(name),
             remove: name => this.classNames.delete(name),
-            toggle: (name, enabled) => enabled ? this.classNames.add(name) : this.classNames.delete(name)
+            toggle: (name, enabled) => enabled ? this.classNames.add(name) : this.classNames.delete(name),
+            contains: name => this.classNames.has(name)
         };
         this.style = {};
+        this.computedStyle = { display: 'block', visibility: 'visible', position: 'static' };
+        this.children = [];
+        this.parentElement = null;
+        this.hidden = false;
         this.isConnected = true;
     }
 
     querySelectorAll(selector) {
-        return this.childrenBySelector.get(selector) || [];
+        const mapped = this.childrenBySelector.get(selector);
+        if (mapped) return mapped;
+        const descendants = [];
+        const visit = element => {
+            element.children.forEach(child => {
+                descendants.push(child);
+                visit(child);
+            });
+        };
+        visit(this);
+        return descendants.filter(element => element.matches(selector));
     }
 
     querySelector(selector) {
@@ -31,10 +46,21 @@ class FakeElement {
     }
 
     matches(selector) {
-        return selector.split(',').some(value => this.selectors.has(value.trim()));
+        return selector.split(',').some(value => {
+            const candidate = value.trim();
+            if (this.selectors.has(candidate)) return true;
+            if (candidate.startsWith('.')) return this.classNames.has(candidate.slice(1));
+            const role = candidate.match(/^\[role="([^"]+)"\]$/);
+            return !!role && this.getAttribute('role') === role[1];
+        });
     }
 
-    closest() {
+    closest(selector) {
+        let current = this;
+        while (current) {
+            if (current.matches(selector)) return current;
+            current = current.parentElement;
+        }
         return null;
     }
 
@@ -59,21 +85,81 @@ class FakeElement {
     }
 
     appendChild(child) {
+        if (child.parentElement) {
+            const index = child.parentElement.children.indexOf(child);
+            if (index >= 0) child.parentElement.children.splice(index, 1);
+        }
         child.parentElement = this;
+        this.children.push(child);
         return child;
     }
 
     replaceChildren(...children) {
         this.children = children;
+        children.forEach(child => { child.parentElement = this; });
     }
 
     remove() {
         this.isConnected = false;
+        if (this.parentElement) {
+            const index = this.parentElement.children.indexOf(this);
+            if (index >= 0) this.parentElement.children.splice(index, 1);
+            this.parentElement = null;
+        }
+    }
+
+    get nextElementSibling() {
+        if (!this.parentElement) return null;
+        const index = this.parentElement.children.indexOf(this);
+        return index < 0 ? null : this.parentElement.children[index + 1] || null;
     }
 
     getBoundingClientRect() {
         return { top: 100, bottom: 100 };
     }
+}
+
+function createDialogFixture({ state = 'open', kind = 'dialog', empty = false, hiddenAncestor = false } = {}) {
+    const wrapper = new FakeElement();
+    const container = new FakeElement();
+    container.classList.add('dialogContainer');
+    const dialog = new FakeElement();
+    if (kind === 'aria') {
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+    } else {
+        dialog.classList.add('dialog');
+        if (kind === 'actionSheet') dialog.classList.add('actionSheet');
+    }
+    const backdrop = new FakeElement();
+    backdrop.classList.add('dialogBackdrop');
+
+    if (state === 'open') {
+        dialog.classList.add('opened');
+        backdrop.classList.add('dialogBackdropOpened');
+    } else if (state === 'hidden') {
+        dialog.classList.add('hide');
+        backdrop.hidden = true;
+    } else if (state === 'closing') {
+        // Jellyfin's close path hides the dialog before removing its backdrop.
+        dialog.classList.add('hide');
+    } else if (state === 'aria-hidden') {
+        dialog.setAttribute('aria-hidden', 'true');
+        backdrop.hidden = true;
+    } else if (state === 'display-none') {
+        dialog.computedStyle.display = 'none';
+        backdrop.computedStyle.display = 'none';
+    } else if (state === 'visibility-hidden') {
+        dialog.computedStyle.visibility = 'hidden';
+        backdrop.computedStyle.visibility = 'hidden';
+    }
+
+    if (hiddenAncestor) wrapper.classList.add('hide');
+    if (empty) backdrop.hidden = true;
+    if (!empty) container.appendChild(dialog);
+    wrapper.appendChild(backdrop);
+    wrapper.appendChild(container);
+    return { wrapper, container, dialog, backdrop };
 }
 
 // Mirrors only the source-backed entries in Alpha Jump's browser registry.
@@ -125,7 +211,7 @@ function createHarness({
     runtime = null,
     playbackExposed = false,
     visibility = 'visible',
-    blockingUi = false
+    dialogFixtures = []
 } = {}) {
     const serverConfiguration = pluginConfiguration && {
         ...pluginConfiguration,
@@ -193,6 +279,13 @@ function createHarness({
     };
     const body = new FakeElement();
     const head = new FakeElement();
+    const dialogElements = dialogFixtures.flatMap(fixture => {
+        const nodes = createDialogFixture(fixture);
+        body.appendChild(nodes.wrapper);
+        return nodes.container.children.length
+            ? [nodes.container, nodes.dialog, nodes.backdrop]
+            : [nodes.container, nodes.backdrop];
+    });
     const document = {
         body,
         head,
@@ -203,11 +296,11 @@ function createHarness({
             if (selector === '.MuiToolbar-root') return [toolbar];
             if (selector === '[role="banner"], .MuiAppBar-root') return [];
             if (selector === '#alpha-jump-plugin-bootstrap') return serverConfiguration ? [pluginMarker] : [];
-            return [];
+            return dialogElements.filter(element => element.matches(selector));
         },
         querySelector: selector => {
             if (selector === '.docspinner.mdlSpinnerActive') return null;
-            return blockingUi ? new FakeElement({ selectors: ['.dialogContainer'] }) : null;
+            return document.querySelectorAll(selector)[0] || null;
         },
         createElement: () => new FakeElement(),
         createTextNode: text => ({ nodeType: 3, textContent: text }),
@@ -276,7 +369,7 @@ function createHarness({
         },
         get ApiClient() { return isApiAvailable ? apiClient : null; },
         matchMedia: () => ({ matches: true }),
-        getComputedStyle: () => ({ position: 'static' }),
+        getComputedStyle: element => element?.computedStyle || { display: 'block', visibility: 'visible', position: 'static' },
         scrollY: 0,
         scrollTo: options => scrollCalls.push(options),
         requestAnimationFrame: callback => {
@@ -395,6 +488,12 @@ function createHarness({
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 const pause = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+function enableKeyboard(harness, mode) {
+    harness.storage.set('active-user-libraryPageSize', '0');
+    harness.api.config.keyboardJumpMode = mode;
+    harness.init();
+}
 
 function assertNoPersistentAlphaJumpMarker(harness) {
     harness.buttons.forEach(button => {
@@ -765,12 +864,91 @@ test('Plain keyboard mode matches picker destination semantics and rejects editi
     ]) assert.equal(keyboard.keyDown(options).prevented, undefined);
     keyboard.api.destroy();
 
-    const dialog = createHarness({ blockingUi: true });
+    const dialog = createHarness({ dialogFixtures: [{ state: 'open' }] });
     dialog.storage.set('active-user-libraryPageSize', '0');
     dialog.api.config.keyboardJumpMode = 'plain';
     dialog.init();
     assert.equal(dialog.keyDown({ key: 'A' }).prevented, undefined);
     dialog.api.destroy();
+});
+
+test('a retained hidden Jellyfin dialog and backdrop do not block the production Plain keyboard path', async () => {
+    const h = createHarness({
+        prefixes: ['AL', 'ZM'],
+        dialogFixtures: [{ state: 'hidden' }]
+    });
+    enableKeyboard(h, 'plain');
+
+    const event = h.keyDown({ key: 'A' });
+    assert.equal(event.prevented, true);
+    await turn();
+    assert.equal(h.scrollCalls.length, 1);
+    h.api.destroy();
+});
+
+test('inactive retained dialog surfaces and hidden ancestors allow Plain keyboard jumps', async () => {
+    const inactiveStates = [
+        { state: 'hidden' },
+        { state: 'display-none' },
+        { state: 'visibility-hidden' },
+        { state: 'open', hiddenAncestor: true },
+        { state: 'open', empty: true },
+        { state: 'aria-hidden', kind: 'aria' }
+    ];
+    for (const fixture of inactiveStates) {
+        const h = createHarness({ prefixes: ['AL', 'ZM'], dialogFixtures: [fixture] });
+        enableKeyboard(h, 'plain');
+        assert.equal(h.keyDown({ key: 'A' }).prevented, true, JSON.stringify(fixture));
+        await turn();
+        assert.equal(h.scrollCalls.length, 1, JSON.stringify(fixture));
+        h.api.destroy();
+    }
+});
+
+test('real Jellyfin dialog, action sheet, ARIA dialog, opening, and closing states block both keyboard modes', () => {
+    const activeFixtures = [
+        { state: 'open' },
+        { state: 'open', kind: 'actionSheet' },
+        { state: 'open', kind: 'aria' },
+        // Opening has no .opened yet, but dialogHelper already removed .hide.
+        { state: 'opening' },
+        // Closing has restored .hide while its sibling backdrop remains mounted.
+        { state: 'closing' }
+    ];
+    for (const fixture of activeFixtures) {
+        const plain = createHarness({ dialogFixtures: [fixture] });
+        enableKeyboard(plain, 'plain');
+        assert.equal(plain.keyDown({ key: 'A' }).prevented, undefined, JSON.stringify(fixture));
+        plain.api.destroy();
+
+        const prefix = createHarness({ dialogFixtures: [fixture] });
+        enableKeyboard(prefix, 'prefix');
+        assert.equal(prefix.keyDown({ key: 'J', shiftKey: true }).prevented, undefined, JSON.stringify(fixture));
+        assert.equal(prefix.test.getState().keyboard.prefix, null, JSON.stringify(fixture));
+        prefix.api.destroy();
+    }
+});
+
+test('Prefix keyboard arms and jumps through retained inactive dialog nodes, including Shift+#', async () => {
+    const h = createHarness({
+        prefixes: ['AL', 'ZM'],
+        dialogFixtures: [{ state: 'hidden' }, { state: 'open', empty: true }]
+    });
+    enableKeyboard(h, 'prefix');
+    assert.equal(h.keyDown({ key: 'J', shiftKey: true }).prevented, true);
+    assert.equal(h.keyDown({ key: 'A' }).prevented, true);
+    await turn();
+    assert.equal(h.scrollCalls.length, 1);
+
+    h.scrollCalls.length = 0;
+    h.root.scrollY = 50;
+    assert.equal(h.keyDown({ key: 'J', shiftKey: true }).prevented, true);
+    assert.equal(h.keyDown({ key: 'Shift', shiftKey: true }).prevented, undefined);
+    assert.ok(h.test.getState().keyboard.prefix);
+    assert.equal(h.keyDown({ key: '#', shiftKey: true }).prevented, true);
+    await turn();
+    assert.equal(h.scrollCalls[0].top, 0);
+    h.api.destroy();
 });
 
 test('Escape cancels Alpha Jump work without intercepting Escape from an input or dialog', async () => {
@@ -786,7 +964,7 @@ test('Escape cancels Alpha Jump work without intercepting Escape from an input o
     assert.equal(input.test.getState().run, null);
     input.api.destroy();
 
-    const dialog = createHarness({ loading: true, blockingUi: true });
+    const dialog = createHarness({ loading: true, dialogFixtures: [{ state: 'open' }] });
     dialog.storage.set('active-user-libraryPageSize', '0');
     dialog.init();
     const pending = dialog.test.execute(dialog.test.getContext(), 'A');

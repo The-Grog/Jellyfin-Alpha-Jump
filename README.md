@@ -1,6 +1,6 @@
 # Alpha Jump for Jellyfin
 
-Alpha Jump is an installable Jellyfin 12 plugin for Jellyfin Web. In supported
+Alpha Jump is an installable Jellyfin 12.1+ plugin for Jellyfin Web. In supported
 library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
 retaining the complete rendered library.
@@ -28,9 +28,7 @@ Any third-party fork that reuses the same GUID is not an official rename or succ
 
 ## Requirements
 
-Alpha Jump targets Jellyfin **12.x**, with behavior developed against Jellyfin
-Web 12.1. It needs Grid view, ascending Name/SortName, and a persisted
-`StartIndex` of zero in a supported grid/tab.
+Alpha Jump requires Jellyfin **12.1 or later**, with behavior developed against Jellyfin Web 12.1. It needs Grid view, ascending Name/SortName, and an effective `StartIndex` of zero in a supported grid/tab.
 
 The plugin configures the signed-in user's browser-local **Library page size**
 to `0` when that option is enabled. Jellyfin treats zero as unpaginated mode,
@@ -46,7 +44,7 @@ Alpha Jump's pagination setup after reload.
 This matrix is backed by the pinned Jellyfin Web 12.1 source and deterministic
 tests. It is **not** live-browser compatibility confirmation yet. All entries
 still require grid layout, ascending `SortName`, explicit `StartIndex: 0`, one
-native picker, and a complete matching rendered-card result.
+native picker, and a complete matching rendered-card result before scrolling.
 
 | Library/view | Supported tabs | Rendered card types |
 | --- | --- | --- |
@@ -88,8 +86,7 @@ layouts, sorts, DOM shapes, and card types fail closed.
 5. Open Alpha Jump's plugin settings and configure the supported libraries and
    options.
 
-The manifest intentionally has no placeholder release. The Catalog entry will
-appear after the first real tagged release publishes its ZIP and checksum.
+The current repository manifest lists **v0.5.0.0**. Disable any existing Alpha Jump JavaScript Injector entry before using the plugin. After installation/restart, refresh open Jellyfin Web tabs to load the script.
 
 ### Manual test installation
 
@@ -115,14 +112,12 @@ The Alpha Jump settings page provides:
 - **Set the active browser user's library page size to zero** — browser-local
   unpaginated setup; enabled by default.
 - **Smooth scroll** and **Enable browser debug logging**.
-- **Keyboard alphabet jump** — defaults to **Prefix** (recommended).
-  Prefix
-  uses `Shift+J`, then `A`–`Z` or `#` within two seconds. **Plain** uses
+- **Keyboard alphabet jump** — defaults to **Prefix**; **Off** disables keyboard jumping. Prefix uses `Shift+J`, then `A`–`Z` or `#` within two seconds. **Plain** uses
   `A`–`Z` or `#` directly and can conflict with browser extensions or other
   plugins.
 
 If JellyTweaks is installed and controls Library Page Size, set its Library
-Page Size to `0` as well (or disable JellyTweaks/all tweaks). Otherwise
+Page Size to `0` as well (or disable that conflicting tweak). Otherwise
 JellyTweaks can restore a nonzero page size after Alpha Jump reloads.
 
 Library choices use stable Jellyfin library IDs, so they survive a rename.
@@ -161,28 +156,27 @@ it cannot overlap a second request.
 
 ## Safety conditions
 
-The enhancement itself is intentionally inert unless all of these are true:
+A completed jump requires all of these conditions:
 
 - One supported route/tab from the support matrix with its matching page ID,
   exact rendered card types, and one native alphabet picker.
 - Grid view, `SortBy: ["SortName"]`, and ascending sort.
-- Persisted view `StartIndex` is explicitly `0`.
+- Effective view `StartIndex` is `0`. On a first visit with no saved view settings, Alpha Jump uses the pinned Web defaults in memory; incomplete existing settings remain unsupported.
 - The numeric toolbar total exactly equals the number of rendered allowed cards.
 
 Jellyfin Web v12.1 documents that zero disables pagination and warns that zero
 (or values above 100) may cause bugs and reduced performance. Automatic setup
 does **not** prove that an already visible query is complete: Alpha Jump still
 requires the exact toolbar/card match above. That includes small libraries and
-filtered results of 100 or fewer; mismatched or pending results retain native
-behavior.
+filtered results of 100 or fewer; pending results can queue a jump when the existing eligibility checks allow it; scrolling still waits for complete results and times out if they never settle.
 
-At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why Alpha Jump refuses a missing or nonzero persisted index. The active preference key is `<signed-in-user-id>-libraryPageSize`, not the old unprefixed assumption. The code uses that key only to configure the preference; it never treats it as evidence that a current result has rendered.
+At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`; that is why Alpha Jump rejects a nonzero index or a missing index in an existing saved settings object. The active preference key is `<signed-in-user-id>-libraryPageSize`, not the old unprefixed assumption. The code uses that key only to configure the preference; it never treats it as evidence that a current result has rendered.
 
 ## Behavior
 
 - Intercepts native alphabet activation only in the supported state.
 - Clears an existing native alphabet selection by activating its existing button once through a narrowly scoped bypass, then waits for the unfiltered result to be ready.
-- Preserves other persisted filters and search constraints; it has no request or API hooks.
+- Preserves other persisted filters and search constraints; it does not fetch library items or alter Jellyfin item requests. Plugin configuration and update checks use their own endpoints.
 - Matches `data-prefix.startsWith(letter)` and scrolls to the first result. It creates no persistent letter selection, marker, custom style, or `aria-current` state, and does not alter native `aria-pressed`.
 - Every `A`–`Z` click repeats that letter's jump. Only `#` is Alpha Jump's return-to-top command.
 - Latest request wins. Escape and the small Cancel button stop a pending request; route, sort, filter, search, page-size, or index changes also cancel it.
@@ -191,6 +185,8 @@ At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`
 Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 
 ## Keyboard shortcuts
+
+**Local fix (2026-09-24; Firefox confirmation pending):** a production-path regression reproduced Plain keyboard activation being blocked by a retained hidden Jellyfin dialog/backdrop. The guard now follows Jellyfin Web 12.1's dialog lifecycle instead of treating mounted nodes as active: `.hide`, hidden ancestors, `hidden`, `aria-hidden`, `display`, and `visibility` are inert; a visible dialog/action sheet, opening dialog, opened backdrop, or closing backdrop remains blocking. This is a locally tested defect correction, not proof that the retained node is the live Firefox cause. Pointer jumping remains unchanged.
 
 Keyboard support defaults to Prefix and uses the same jump path as clicking the native
 alphabet picker; it does not synthesize picker clicks. Prefix mode arms a
@@ -210,16 +206,18 @@ but another extension with an earlier capture-phase listener can still prevent
 Alpha Jump from seeing a key; universal shortcut compatibility is not claimed.
 
 Background music does not disable browsing shortcuts, but player and detail
-routes remain native. Jellyfin Enhanced shortcut defaults (including claimed
-`D`/`Q`/`R` and `Shift+H` bindings) have not been verified against a specific
-Enhanced source/version. Alpha Jump does not modify Enhanced settings; test
-with Enhanced enabled and rebind or disable either feature if a conflict occurs.
+routes remain native. No matching Jellyfin Enhanced source was available in
+this workspace, so its shortcut defaults (including claimed `D`/`Q`/`R` and
+`Shift+H` bindings) remain unverified. Alpha Jump does not modify Enhanced
+settings; test with Enhanced enabled and rebind or disable either feature if a
+conflict occurs.
 
 ## Development and validation
 
 ```powershell
 node --check src/alpha-jump.js
 node --test tests/alpha-jump.test.js
+node scripts/validate-release-abi.js
 dotnet build plugin/Jellyfin.Plugin.AlphaJump/Jellyfin.Plugin.AlphaJump.csproj --configuration Release
 dotnet test plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj --configuration Release
 git diff --check
@@ -272,7 +270,7 @@ The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin
 
 The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
 
-On 2026-09-21 this host built the production project with .NET SDK `10.0.401` (zero warnings) and ran the C# suite successfully (9 passed). Served Jellyfin validation still requires a separately approved disposable-server test.
+Local validation on 2026-09-24 passed 94 JavaScript tests and 31 C# tests. The C# build/test run reported NU1900 because NuGet vulnerability metadata was unavailable. Automated checks do not establish served-browser compatibility.
 
 To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Native clients remain outside this browser-only scope.
 
@@ -296,7 +294,7 @@ reload the page.
 
 ### Restore the prior page-size preference
 
-First disable/remove the Injector entry (or do not re-paste a console copy), so
+First disable plugin injection or remove the Injector entry (or do not re-paste a console copy), so
 the next load cannot apply zero again. Then, while signed in as the same user
 and on the same browser origin, run:
 
@@ -308,7 +306,7 @@ It restores Alpha Jump's one-time backup for that user, including removing the
 preference when it was originally absent. It does not reload; refresh manually
 after the script is disabled to let Jellyfin use the restored value.
 
-## Findings
+## Feasibility and findings
 
 These are implementation records, not a compatibility claim.
 
@@ -316,7 +314,7 @@ These are implementation records, not a compatibility claim.
 | --- | --- |
 | Page size zero is a native v12.1 mode | `LibraryPreferences.tsx` exposes `libraryPageSize`; the English preference help says zero disables pagination and warns about bugs/reduced performance. `getLimitQuery()` turns zero into an omitted request `limit`. |
 | Correct preference key is user-local | `userSettings.libraryPageSize()` calls `set('libraryPageSize', value, false)`. That calls `appSettings.set(name, value, currentUserId)`, whose key format is `<userId>-<name>`. The current user comes from public `window.ApiClient.getCurrentUserId()`. |
-| Start index still matters | The v12.1 item request continues to send `StartIndex`. The script requires explicit persisted `StartIndex: 0`, so it cannot mistake an unpaginated suffix for the full constrained library. |
+| Start index still matters | The v12.1 item request continues to send `StartIndex`. The script requires effective `StartIndex: 0` (native defaults when settings are absent), so it cannot mistake an unpaginated suffix for the full constrained library. |
 | Unprefixed storage was a historical mistake | The served session had no unprefixed `libraryPageSize`, which correctly exposed the old implementation defect. v12.1 source shows that the correct active-user key is prefixed; this prototype now reads/writes only that key and preserves a scoped backup. |
 | Small results are resolved by equality, not a threshold | A toolbar total equal to the rendered allowed-card count proves that current result is complete, including <=100 results. A large number by itself proves nothing. An active native alphabet remains fail-closed until the same alphabet-clear query was previously confirmed. |
 | Readiness is a render-state question | `ItemsView` shows Loading while its result is pending, then Cards or `NoItemsMessage`. An empty DOM or cleared native alphabet button by itself is insufficient. |
@@ -324,14 +322,14 @@ These are implementation records, not a compatibility claim.
 | Card prefix and type are the match surface | Supported card wrappers expose `data-prefix` and a source-defined `data-type`; matching uses literal `startsWith(letter)`, not equality or an unverified ordering shortcut. A heterogeneous grid is accepted only when every card has an allowed type and usable prefix. |
 | Multi-library support is registry-bound | The script has an explicit v12.1 route/tab/settings/card-type registry. It does not broaden itself to every visible card; unavailable tabs and Live TV retain native behavior. |
 | The former page scan is historical | The earlier Previous/Next experiment proved visible replacing pages cannot yield Plex-style continuous scrolling. This design removes its pager machinery in favour of v12.1's native zero-page-size path. |
-| Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it still arms only after the current result's toolbar/card equality and other view gates succeed. |
+| Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it scrolls only after the current result's toolbar/card equality and other view gates succeed; eligible loading states may queue a request. |
 | Jellyfin Enhanced remains a compatibility risk | With Jellyfin Enhanced active, an earlier zero-page-size observation exposed a virtualized region reporting `showing 0-500 of 4609 items` while the toolbar reported 1,538. The prototype only inspects rendered cards, so it cannot yet claim a complete constrained-query scan or acceptable performance under that plugin. |
 
 The target browser still has to validate served-DOM selectors, keyboard/capture event ordering, network parameters, cleared-filter timing, pagination-zero performance, and Jellyfin Enhanced coexistence. See [docs/feasibility.md](docs/feasibility.md) and [docs/testing.md](docs/testing.md).
 
 ## Limits
 
-- Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including supported non-Movie library views. Its performance on the target roughly 1,500-title library is **not yet tested**.
+- Page size zero asks Jellyfin to load and render the entire currently constrained result for this browser user, including supported non-Movie library views. The maintainer reports working pointer jumps in the current installation; this is not a general performance benchmark or confirmation for every library type.
 - Source inspection supports the selectors and readiness model, but a served page must still prove event interception, request parameters, loading behavior, sticky-header positioning, and Jellyfin Enhanced coexistence.
 - Sort-name/card-prefix collation for custom titles, punctuation, accents, and non-Latin titles is not claimed beyond the literal prefix values the page renders.
 - A controlled served-server installation and full browser compatibility test
@@ -341,6 +339,6 @@ The previous sequential native-page scan is retained as historical evidence in [
 
 ## Shows support
 
-Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. In standalone injection, set `showsEnabled: false` to leave Shows native; set `moviesOnly: true` to limit Alpha Jump to the original Movies main grid and leave all expanded views native. Source and local regression tests verify the hooks; Shows has not yet been tested in the live browser.
+Shows support is enabled by default (`showsEnabled: true`, `moviesOnly: false`). It targets Series cards on the main Shows tab, using `series - <parentId>` view settings. It shares the existing complete-result, grid, ascending SortName, cancellation, and cleanup checks. In standalone injection, set `showsEnabled: false` to leave Shows native; set `moviesOnly: true` to limit Alpha Jump to the original Movies main grid and leave all expanded views native. Source and regression tests cover these options. The maintainer has reported working Movies/Shows behavior; broader compatibility remains subject to the testing matrix.
 
 For testing, replace the existing Injector entry with the updated source, save, and fully reload. Open Shows, select its main Shows tab, use Name ascending/grid, and clear native alphabet filtering. Try A, M, Z, then #, and verify all shows remain scrollable. Navigate Movies → Shows → Movies and verify both pickers. Episodes and other TV tabs should retain native behavior.

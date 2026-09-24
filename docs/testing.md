@@ -1,21 +1,35 @@
 # Alpha Jump test record
 
-Date: 2026-09-20 to 2026-09-23. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
+Date: 2026-09-20 to 2026-09-24. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
 
 Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
 
 ## Optional keyboard alphabet jump — 2026-09-24
 
-Automated local coverage was added for the actual document capture listener and
-shared activation path, not a duplicate jump implementation. `node --check
-src/alpha-jump.js` and `node --test tests/alpha-jump.test.js` passed **94/94**.
+Automated local coverage uses the actual document capture listener and shared
+activation path, not a duplicate jump implementation. A new failing regression
+first reproduced the retained-hidden-dialog defect: a mounted hidden
+`.dialogContainer` made Plain `A` stay native. After the source-backed guard
+change, `node --check src/alpha-jump.js` and `node --test
+tests/alpha-jump.test.js` passed **98/98**.
 The tests cover Prefix/default and old-contract fail-closed behavior; Prefix arm,
 letter/# consumption (including standalone Shift then Shift-generated #),
 timeout, Escape, unrelated input, and repeated arming;
 Plain destination parity with pointer activation; uppercase and `#`; editing
-and focused-control guards; dialogs, modifiers, repeat, IME, normal keys;
+and focused-control guards; modifiers, repeat, IME, normal keys; retained
+hidden dialogs/backdrops; `hidden`, `aria-hidden`, `display:none`,
+`visibility:hidden`, and hidden ancestors; empty containers; and active,
+opening, closing, action-sheet, and ARIA dialog states in both keyboard modes;
 Escape cancels internal work without suppressing an input's or dialog's Escape;
 loading/query changes; focus, blur, visibility, destroy, and reinjection.
+
+The guard is based on Jellyfin Web 12.1 `dialogHelper`: dialogs begin with
+`.hide`, become active when that class is removed, and the backdrop gains
+`.dialogBackdropOpened`; close restores `.hide` before the paired backdrop is
+removed. Opacity alone is not used. This is local source/test evidence only.
+The exact retained node in the maintainer's Firefox session and the resulting
+shortcut behavior remain untested. No matching Jellyfin Enhanced source was
+available locally, so its coexistence is still a browser check.
 
 The Release production build passed and the C# suite passed **31/31**. The
 suite includes XML round-trip preservation of the `prefix` default and explicit
@@ -26,14 +40,18 @@ are local deterministic checks, not a served-plugin/dashboard/browser result.
 
 ### Required keyboard browser checks (not run)
 
-1. Refresh a supported enabled grid after saving each dashboard mode, then
+1. In Firefox, refresh a supported enabled grid after saving each dashboard mode, then
    verify Off leaves A-Z/# native; Prefix uses Shift+J then a letter/# within
    two seconds; Plain reaches the same first card as a pointer click.
-2. Verify keyboard events stay native in search/filter inputs, editable ARIA
-   controls, menus, dialogs/action sheets, and unsupported routes/layouts.
-3. Test Escape, blur, hidden visibility, navigation and a filter change while
+2. While an action sheet/dialog is opening, open, and closing, verify both
+   modes remain native. Once it is fully closed, verify shortcuts work again;
+   repeat with an ordinary retained hidden dialog/backdrop if one is present.
+3. Verify keyboard events stay native in search/filter inputs, editable ARIA
+   controls, menus, and unsupported routes/layouts. Test Prefix `Shift+J`,
+   release, then `Shift+3`/`#` on the actual keyboard layout.
+4. Test Escape, blur, hidden visibility, navigation and a filter change while
    Prefix is armed; its notice must disappear without moving focus.
-4. With Jellyfin Enhanced enabled and then disabled, record its exact version
+5. With Jellyfin Enhanced enabled and then disabled, record its exact version
    and any shortcut conflict. Alpha Jump does not assert D/Q/R or Shift+H
    compatibility until that source/version is verified.
 

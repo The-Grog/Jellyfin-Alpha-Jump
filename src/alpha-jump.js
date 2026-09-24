@@ -1222,11 +1222,69 @@
         return !!element.closest?.('input, textarea, select, button, [contenteditable], [role="textbox"], [role="combobox"], [role="searchbox"], [role="spinbutton"], [role="button"], [role="menuitem"], [role="option"], [role="listbox"]');
     }
 
-    // Jellyfin Web v12.1 legacy dialogs mount a .dialogContainer/.dialog and
-    // action-sheet backdrop. The ARIA checks additionally cover accessible
-    // dialogs without relying on unrelated page-level class names.
+    function hasClass(element, name) {
+        return !!element?.classList?.contains?.(name);
+    }
+
+    function isHiddenDialogNode(element) {
+        for (let current = element; current && current.nodeType === 1; current = current.parentElement) {
+            const hiddenAttribute = current.getAttribute?.('hidden');
+            if (current.hidden
+                || hiddenAttribute != null
+                || current.getAttribute?.('aria-hidden') === 'true'
+                || hasClass(current, 'hide')) return true;
+
+            const style = root.getComputedStyle?.(current);
+            if (style?.display === 'none'
+                || style?.visibility === 'hidden'
+                || style?.visibility === 'collapse') return true;
+        }
+        return false;
+    }
+
+    function isConnectedAndVisible(element) {
+        return !!element && element.isConnected !== false && !isHiddenDialogNode(element);
+    }
+
+    function backdropIsClosingDialog(backdrop) {
+        // dialogHelper removes dialogBackdropOpened first and then removes the
+        // backdrop after 300ms. During that closing window the preceding
+        // backdrop is paired with a still-mounted .dialogContainer whose
+        // dialog has regained .hide.
+        const container = backdrop?.nextElementSibling;
+        if (!hasClass(container, 'dialogContainer') || !isConnectedAndVisible(container)) return false;
+        return Array.from(container.querySelectorAll?.('.dialog, [role="dialog"], [role="alertdialog"]') || [])
+            .some(dialog => dialog?.isConnected !== false
+                && (hasClass(dialog, 'hide') || dialog.getAttribute?.('aria-hidden') === 'true'));
+    }
+
+    function dialogNodeIsActive(element) {
+        if (!isConnectedAndVisible(element)) return false;
+        if (hasClass(element, 'dialogBackdrop')) {
+            return hasClass(element, 'dialogBackdropOpened') || backdropIsClosingDialog(element);
+        }
+        if (hasClass(element, 'dialogContainer')) {
+            // A retained empty container is not a modal. Its actual dialog is
+            // checked separately so Jellyfin's opening state (not yet
+            // .opened) is still protected.
+            return Array.from(element.querySelectorAll?.('.dialog, [role="dialog"], [role="alertdialog"]') || [])
+                .some(dialogNodeIsActive);
+        }
+        // v12.1 dialogHelper creates dialogs with .hide, removes it while
+        // opening, and adds .opened afterwards. A visible .dialog therefore
+        // covers both the opening and open phases. Visible ARIA dialogs are
+        // also conservative blocking UI; opacity is deliberately ignored.
+        return hasClass(element, 'dialog')
+            || element.getAttribute?.('role') === 'dialog'
+            || element.getAttribute?.('role') === 'alertdialog';
+    }
+
+    // Jellyfin Web v12.1 retains some closed dialog containers. Do not block
+    // keyboard activation merely because one remains mounted: inspect its
+    // source-backed hidden/open lifecycle and all ancestors instead.
     function blockingUiIsOpen() {
-        return !!doc.querySelector?.('.dialogContainer, .dialog, .dialogBackdrop, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
+        return Array.from(doc.querySelectorAll?.('.dialogContainer, .dialog, .dialogBackdrop, [role="dialog"], [role="alertdialog"]') || [])
+            .some(dialogNodeIsActive);
     }
 
     function keyboardEventIsEligible(event) {
