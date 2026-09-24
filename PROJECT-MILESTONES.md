@@ -264,3 +264,23 @@ Corrected the plugin review findings without installation, restart, commit, push
 ### Focused plugin follow-up corrections — 2026-09-21
 
 Corrected two additional review findings without any server action. Global disable now affects only runtime client configuration: dashboard rows retain their persisted per-library enabled/disabled choice, preventing a save while globally disabled from erasing selections. Plugin browser startup now treats a missing or not-yet-authenticated public `ApiClient` as temporary readiness, with at most eight short timeout retries that cancel on navigation or destroy; malformed/failed configuration responses remain fail-closed. The Node suite passed **30/30**, the Release C# build passed with **0 warnings/0 errors**, C# tests passed **9/9**, and `git diff --check` passed. Served dashboard and early-startup behavior remain controlled-installation test requirements.
+
+## Optional keyboard alphabet jump — 2026-09-24
+
+Implemented a global, XML-persisted keyboard mode with fail-closed exact values:
+`prefix` (the default; Shift+J then A-Z/# within two seconds), `off`, and
+`plain` (direct A-Z/#). The admin dashboard exposes the supported select and
+the browser/server configuration contract is now version 3; stale v2 browser
+scripts retain native behavior until refreshed. The existing document capture
+listener now routes an owned keyboard request through the same picker
+activation/execution path, including native alphabet clearing, readiness,
+latest-request cancellation, # behavior, and scrolling. It rejects editable
+targets, focused controls, modal/action-sheet UI, repeat/composition/modifier
+events, unsupported states, and all uncertain context. Prefix state has an
+accessible non-focusable notice and cleans up on expiry, Escape, unrelated
+input, focus/blur/visibility, query/navigation changes, detach, destroy, and
+reinjection. Local `node --check`, **94/94** JavaScript tests, Release C# build,
+and **31/31** C# tests passed; build warnings were only unavailable NuGet
+vulnerability metadata. No server install, dashboard use, browser test,
+restart, commit, tag, push, or publication occurred. Controlled browser and
+Enhanced coexistence verification remain Milestone 3 work.

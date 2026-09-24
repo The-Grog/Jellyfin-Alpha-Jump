@@ -112,12 +112,22 @@ The Alpha Jump settings page provides:
 - **Set the active browser user's library page size to zero** — browser-local
   unpaginated setup; enabled by default.
 - **Smooth scroll** and **Enable browser debug logging**.
+- **Keyboard alphabet jump** — defaults to **Prefix** (recommended).
+  Prefix
+  uses `Shift+J`, then `A`–`Z` or `#` within two seconds. **Plain** uses
+  `A`–`Z` or `#` directly and can conflict with browser extensions or other
+  plugins.
 
 If JellyTweaks is installed and controls Library Page Size, set its Library
 Page Size to `0` as well (or disable JellyTweaks/all tweaks). Otherwise
 JellyTweaks can restore a nonzero page size after Alpha Jump reloads.
 
 Library choices use stable Jellyfin library IDs, so they survive a rename.
+
+Changing a plugin setting takes effect after a browser refresh. The keyboard
+setting is global to Alpha Jump, not per library. If Plain conflicts with a
+different extension or plugin, rebind or disable that shortcut, or use Prefix
+mode instead.
 
 ## Update recovery
 
@@ -176,6 +186,31 @@ At page size zero, v12.1 omits the request `limit`, but still sends `StartIndex`
 - Empty DOM or Jellyfin's query-specific pending toolbar bullet never count as a settled empty library. Waits are observer-driven, cancellable, and bounded.
 
 Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
+
+## Keyboard shortcuts
+
+Keyboard support defaults to Prefix and uses the same jump path as clicking the native
+alphabet picker; it does not synthesize picker clicks. Prefix mode arms a
+small, non-focusable `Jump to: A–Z / #` status notice for two seconds.
+`Escape` cancels that prefix (or an already-running jump). Uppercase letters
+and `#` are accepted from `event.key` on layouts that emit those characters.
+
+Alpha Jump leaves the event untouched unless it can prove a supported enabled
+grid and no text/control/modal interaction is underway. It never owns input,
+textarea, select, contenteditable, editable ARIA widgets, focused controls,
+dialogs/action sheets, repeated or IME keys, or Ctrl/Alt/Meta/AltGraph
+combinations. A standalone Shift press preserves an armed Prefix so layouts
+that generate `#` using Shift can complete the command. It also cancels an armed prefix on unrelated input, editable
+focus, modal focus, blur, hidden tab, navigation/query change, disablement,
+detach, destroy, or reinjection. This protects ordinary typing and controls,
+but another extension with an earlier capture-phase listener can still prevent
+Alpha Jump from seeing a key; universal shortcut compatibility is not claimed.
+
+Background music does not disable browsing shortcuts, but player and detail
+routes remain native. Jellyfin Enhanced shortcut defaults (including claimed
+`D`/`Q`/`R` and `Shift+H` bindings) have not been verified against a specific
+Enhanced source/version. Alpha Jump does not modify Enhanced settings; test
+with Enhanced enabled and rebind or disable either feature if a conflict occurs.
 
 ## Development and validation
 

@@ -39,7 +39,8 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
                 supported && LibrarySelection.IsEnabled(configuration, libraryId),
                 configuration.AutoDisablePagination,
                 configuration.SmoothScroll,
-                configuration.Debug);
+                configuration.Debug,
+                KeyboardJumpModes.Normalize(configuration.KeyboardJumpMode));
         }
     }
 
@@ -57,7 +58,8 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
                 configuration.BuiltInCollectionsEnabled,
                 configuration.AutoDisablePagination,
                 configuration.SmoothScroll,
-                configuration.Debug);
+                configuration.Debug,
+                KeyboardJumpModes.Normalize(configuration.KeyboardJumpMode));
         }
     }
 
@@ -85,6 +87,7 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
             configuration.AutoDisablePagination = update.AutoDisablePagination;
             configuration.SmoothScroll = update.SmoothScroll;
             configuration.Debug = update.Debug;
+            configuration.KeyboardJumpMode = KeyboardJumpModes.Normalize(update.KeyboardJumpMode);
 
             var supported = libraries.Where(library => library.IsSupported)
                 .ToDictionary(library => LibraryId.Normalize(library.Id), StringComparer.Ordinal);
@@ -138,6 +141,7 @@ public sealed class AlphaJumpConfigurationService : IAlphaJumpConfigurationServi
             configuration.AutoDisablePagination,
             configuration.SmoothScroll,
             configuration.Debug,
+            KeyboardJumpModes.Normalize(configuration.KeyboardJumpMode),
             libraries.Select(library => new AdministratorLibrary(
                     LibraryId.Normalize(library.Id),
                     library.Name,

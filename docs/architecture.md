@@ -121,6 +121,40 @@ The earlier prototype returned to page one with native Previous and scanned nati
 
 Source confirms the request and render paths, but it does not prove served-DOM compatibility, event ordering for browser-generated keyboard clicks, nor full-library performance. Those remain explicit browser checks in [testing.md](testing.md).
 
+## Optional keyboard alphabet jump — 2026-09-24
+
+`KeyboardJumpMode` is an XML-persisted global plugin value with exact wire
+values `off`, `prefix`, and `plain`. Its property default is `prefix`; missing
+legacy persisted/dashboard values receive Prefix, while explicit invalid values
+normalize to `off`, and the
+browser rejects a malformed client configuration. The client configuration
+contract is therefore version 3. An old open browser script expecting v2 fails
+closed against the new response and keeps native picker behavior until its
+ordinary refresh/update-recovery path loads the current script.
+
+The document-level capture-phase `keydown` listener is the existing keyboard
+entry point, extended rather than supplemented by a generic listener. After
+the same route/layout/sort/potential-readiness checks used for picker clicks,
+it calls `activateJump()`, which is also the picker path and in turn calls the
+single `execute()` algorithm. It owns and prevents an event only after those
+checks pass. `Plain` accepts `event.key` `A`–`Z`/`a`–`z` and `#`; `Prefix`
+requires `Shift+J` then one accepted character within 2 seconds. Repeating
+`Shift+J` restarts the prefix window. `#` is deliberately routed through the
+ordinary native-clear/readiness flow whenever a native alphabet filter exists.
+
+Jellyfin Web v12.1 legacy dialog code uses `.dialogContainer`, `.dialog`, and
+`.dialogBackdrop`; those narrowly scoped source-backed shapes, plus modal ARIA
+roles, block keyboard ownership. Input, textarea, select, contenteditable,
+editable ARIA widgets, and focused controls also block it. A standalone Shift
+key preserves an armed Prefix so a following Shift-generated `#` can be
+received; Ctrl/Alt/Meta/AltGraph still cancel it. Escape cancels Alpha Jump's
+prefix/run state but only prevents or stops Escape when the focus/modal guards
+permit ownership. Blur,
+hidden visibility, navigation/query identity changes, detach, destroy, and
+reinjection clear an armed prefix and remove its non-focusable status notice.
+This listener cannot override another tool that stops an earlier capture-phase
+event; that limitation is intentional and documented rather than bypassed.
+
 ## Server-plugin delivery prototype — 2026-09-21
 
 `plugin/Jellyfin.Plugin.AlphaJump` is a separate .NET 10 Jellyfin 12.1 plugin project. Its only browser payload is an MSBuild-linked embedded resource from `../../src/alpha-jump.js`; the standalone and plugin modes therefore execute identical source.
@@ -152,10 +186,11 @@ not a discovered virtual folder and must not receive a fabricated GUID. The
 dashboard also renders Live TV as a deliberately disabled built-in row with an
 empty ID rather than pretending it is a configurable virtual folder. The
 authenticated client endpoint returns only one requested normalized GUID or the
-Collections scope and Alpha Jump's five booleans, not an inventory.
+Collections scope and Alpha Jump's booleans plus explicit keyboard mode, not
+an inventory.
 
 In plugin mode, the browser code does not set its page-size preference or attach
-picker capture handlers until it validates contract version 2 for the current
+picker capture handlers until it validates contract version 3 for the current
 normalized `topParentId`, or the explicit built-in Collections scope. A malformed
 or failed request marks that route unavailable and retains native behavior; it
 cannot fall back to the standalone defaults. A missing public `ApiClient` or

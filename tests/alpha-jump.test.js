@@ -124,8 +124,13 @@ function createHarness({
     pluginConfigurationFailure = false,
     runtime = null,
     playbackExposed = false,
-    visibility = 'visible'
+    visibility = 'visible',
+    blockingUi = false
 } = {}) {
+    const serverConfiguration = pluginConfiguration && {
+        ...pluginConfiguration,
+        keyboardJumpMode: pluginConfiguration.keyboardJumpMode ?? 'prefix'
+    };
     const view = TEST_VIEWS[library] || TEST_VIEWS.movies;
     const pageId = view.pageId;
     const observers = [];
@@ -168,30 +173,51 @@ function createHarness({
     page.childrenBySelector.set('.noItemsMessage.centerMessage', []);
 
     const documentListeners = new Map();
+    const documentListenerSets = new Map();
     const windowListeners = new Map();
+    const windowListenerSets = new Map();
+    const addListener = (listeners, listenerSets, type, callback) => {
+        const callbacks = listenerSets.get(type) || new Set();
+        callbacks.add(callback);
+        listenerSets.set(type, callbacks);
+        listeners.set(type, event => callbacks.forEach(listener => listener(event)));
+    };
+    const removeListener = (listeners, listenerSets, type, callback) => {
+        const callbacks = listenerSets.get(type);
+        if (!callbacks) return;
+        callbacks.delete(callback);
+        if (!callbacks.size) {
+            listenerSets.delete(type);
+            listeners.delete(type);
+        }
+    };
     const body = new FakeElement();
     const head = new FakeElement();
     const document = {
         body,
         head,
         visibilityState: visibility,
+        activeElement: null,
         querySelectorAll: selector => {
             if (selector === '#' + pageId) return [page];
             if (selector === '.MuiToolbar-root') return [toolbar];
             if (selector === '[role="banner"], .MuiAppBar-root') return [];
-            if (selector === '#alpha-jump-plugin-bootstrap') return pluginConfiguration ? [pluginMarker] : [];
+            if (selector === '#alpha-jump-plugin-bootstrap') return serverConfiguration ? [pluginMarker] : [];
             return [];
         },
-        querySelector: selector => selector === '.docspinner.mdlSpinnerActive' ? null : null,
+        querySelector: selector => {
+            if (selector === '.docspinner.mdlSpinnerActive') return null;
+            return blockingUi ? new FakeElement({ selectors: ['.dialogContainer'] }) : null;
+        },
         createElement: () => new FakeElement(),
         createTextNode: text => ({ nodeType: 3, textContent: text }),
-        addEventListener(type, callback) { documentListeners.set(type, callback); },
-        removeEventListener(type, callback) { if (documentListeners.get(type) === callback) documentListeners.delete(type); }
+        addEventListener(type, callback) { addListener(documentListeners, documentListenerSets, type, callback); },
+        removeEventListener(type, callback) { removeListener(documentListeners, documentListenerSets, type, callback); }
     };
     const storage = new Map([
         [`${view.settingsKey} - library`, JSON.stringify(settings)]
     ]);
-    const pluginMarker = pluginConfiguration ? new FakeElement() : null;
+    const pluginMarker = serverConfiguration ? new FakeElement() : null;
     if (pluginMarker) {
         pluginMarker.setAttribute('data-alpha-jump-mode', 'plugin');
         pluginMarker.setAttribute('data-alpha-jump-config-url', '/AlphaJump/client-config');
@@ -221,7 +247,7 @@ function createHarness({
             ajaxRequests.push(options);
             return pluginConfigurationFailure
                 ? Promise.reject(new Error('server unavailable'))
-                : Promise.resolve(options.url === '/AlphaJump/runtime' ? nextRuntimeResponse() : pluginConfiguration);
+                : Promise.resolve(options.url === '/AlphaJump/runtime' ? nextRuntimeResponse() : serverConfiguration);
         },
         subscribe: (_events, callback) => {
             const subscription = { callback, active: true };
@@ -260,8 +286,8 @@ function createHarness({
         cancelAnimationFrame() {},
         setTimeout,
         clearTimeout,
-        addEventListener(type, callback) { windowListeners.set(type, callback); },
-        removeEventListener(type, callback) { if (windowListeners.get(type) === callback) windowListeners.delete(type); },
+        addEventListener(type, callback) { addListener(windowListeners, windowListenerSets, type, callback); },
+        removeEventListener(type, callback) { removeListener(windowListeners, windowListenerSets, type, callback); },
         MutationObserver: class {
             constructor(callback) {
                 this.callback = callback;
@@ -304,6 +330,24 @@ function createHarness({
         pickerRoot.listeners.get('click')?.(event);
         return event;
     };
+    const editableTarget = selector => {
+        const target = new FakeElement({ selectors: [selector] });
+        target.closest = query => target.matches(query) ? target : null;
+        return target;
+    };
+    const keyDown = ({ key, target = body, ...options }) => {
+        const event = {
+            key,
+            target,
+            defaultPrevented: false,
+            preventDefault() { this.defaultPrevented = true; this.prevented = true; },
+            stopImmediatePropagation() { this.stopped = true; },
+            getModifierState: name => name === 'AltGraph' && options.altGraph === true,
+            ...options
+        };
+        documentListeners.get('keydown')?.(event);
+        return event;
+    };
     buttons.forEach(button => {
         button.click = () => {
             const event = { target: button, preventDefault() {}, stopImmediatePropagation() {} };
@@ -328,6 +372,8 @@ function createHarness({
         persist,
         notify,
         clickPicker,
+        keyDown,
+        editableTarget,
         activateNative,
         root,
         storage,
@@ -339,6 +385,8 @@ function createHarness({
         emitRestart: () => subscriptions.filter(subscription => subscription.active).forEach(subscription => subscription.callback()),
         get activeSubscriptions() { return subscriptions.filter(subscription => subscription.active).length; },
         setVisibility: value => { document.visibilityState = value; documentListeners.get('visibilitychange')?.(); },
+        blur: () => windowListeners.get('blur')?.(),
+        focusEditable: target => { document.activeElement = target; documentListeners.get('focusin')?.({ target }); },
         get runtimeCalls() { return runtimeCalls; },
         ajaxRequests,
         get reloads() { return reloads; }
@@ -601,6 +649,186 @@ test('production detach removes its listener and feedback without changing nativ
     assertNoPersistentAlphaJumpMarker(harness);
 });
 
+test('keyboard shortcuts default to Prefix and invalid/old plugin contract responses fail closed', async () => {
+    const standalone = createHarness();
+    standalone.storage.set('active-user-libraryPageSize', '0');
+    standalone.init();
+    const untouched = standalone.keyDown({ key: 'A' });
+    assert.equal(untouched.prevented, undefined);
+    assert.equal(standalone.scrollCalls.length, 0);
+    assert.equal(standalone.keyDown({ key: 'J', shiftKey: true }).prevented, true);
+    assert.ok(standalone.test.getState().keyboard.prefix);
+    standalone.api.destroy();
+
+    const oldContract = createHarness({
+        pluginConfiguration: {
+            contractVersion: 2, scope: 'library', libraryId: 'library', enabled: true,
+            libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false
+        }
+    });
+    oldContract.init();
+    await turn();
+    assert.equal(oldContract.pickerRoot.listeners.has('click'), false);
+    oldContract.api.destroy();
+
+    const invalidMode = createHarness({
+        routeLibraryId: '0123456789abcdef0123456789abcdef',
+        pluginConfiguration: {
+            contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef',
+            enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false,
+            debug: false, keyboardJumpMode: 'unexpected'
+        }
+    });
+    invalidMode.init();
+    await turn();
+    assert.equal(invalidMode.pickerRoot.listeners.has('click'), false);
+    invalidMode.api.destroy();
+});
+
+test('Prefix keyboard mode owns Shift+J then uses the picker activation path for letters and #', async () => {
+    const h = createHarness({ prefixes: ['AL', 'ZM'] });
+    h.storage.set('active-user-libraryPageSize', '0');
+    h.api.config.keyboardJumpMode = 'prefix';
+    h.init();
+    const arm = h.keyDown({ key: 'J', shiftKey: true });
+    assert.equal(arm.prevented, true);
+    assert.equal(h.test.getState().keyboard.prefix.notice.textContent, 'Jump to: A–Z / #');
+    const letter = h.keyDown({ key: 'a' });
+    assert.equal(letter.prevented, true);
+    await turn();
+    assert.equal(h.scrollCalls.length, 1);
+    assert.equal(h.settings.Alphabet, null);
+    assert.equal(h.test.getState().keyboard.prefix, null);
+
+    h.scrollCalls.length = 0;
+    h.root.scrollY = 55;
+    h.keyDown({ key: 'J', shiftKey: true });
+    const shift = h.keyDown({ key: 'Shift', shiftKey: true });
+    assert.equal(shift.prevented, undefined);
+    assert.ok(h.test.getState().keyboard.prefix);
+    const top = h.keyDown({ key: '#' , shiftKey: true });
+    assert.equal(top.prevented, true);
+    await turn();
+    assert.equal(h.scrollCalls[0].top, 0);
+    h.api.destroy();
+});
+
+test('Prefix mode expires, Escape and unrelated keys cancel, and repeated Shift+J restarts its window', async () => {
+    const h = createHarness();
+    h.storage.set('active-user-libraryPageSize', '0');
+    h.api.config.keyboardJumpMode = 'prefix';
+    h.api.config.keyboardPrefixTimeoutMs = 1;
+    h.init();
+    h.keyDown({ key: 'J', shiftKey: true });
+    await pause(5);
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    assert.equal(h.keyDown({ key: 'A' }).prevented, undefined);
+
+    h.keyDown({ key: 'J', shiftKey: true });
+    const escape = h.keyDown({ key: 'Escape' });
+    assert.equal(escape.prevented, true);
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.keyDown({ key: 'J', shiftKey: true });
+    const handledEscape = h.keyDown({ key: 'Escape', defaultPrevented: true });
+    assert.equal(handledEscape.prevented, undefined);
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.keyDown({ key: 'J', shiftKey: true });
+    assert.equal(h.keyDown({ key: '!' }).prevented, undefined);
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.keyDown({ key: 'J', shiftKey: true });
+    const first = h.test.getState().keyboard.prefix;
+    h.keyDown({ key: 'J', shiftKey: true });
+    assert.notEqual(h.test.getState().keyboard.prefix, first);
+    h.api.destroy();
+});
+
+test('Plain keyboard mode matches picker destination semantics and rejects editing, controls, dialogs, and modifiers', async () => {
+    const keyboard = createHarness({ prefixes: ['AL', 'ZM'] });
+    keyboard.storage.set('active-user-libraryPageSize', '0');
+    keyboard.api.config.keyboardJumpMode = 'plain';
+    keyboard.init();
+    const a = keyboard.keyDown({ key: 'A', shiftKey: true });
+    assert.equal(a.prevented, true);
+    await turn();
+    const keyboardTop = keyboard.scrollCalls[0].top;
+    keyboard.scrollCalls.length = 0;
+    keyboard.clickPicker('A');
+    await turn();
+    assert.equal(keyboard.scrollCalls[0].top, keyboardTop);
+    for (const options of [
+        { key: 'A', target: keyboard.editableTarget('input') },
+        { key: 'A', target: keyboard.editableTarget('[role="textbox"]') },
+        { key: 'A', target: keyboard.editableTarget('button') },
+        { key: 'A', ctrlKey: true }, { key: 'A', altKey: true }, { key: 'A', metaKey: true },
+        { key: 'A', altGraph: true }, { key: 'A', repeat: true }, { key: 'A', isComposing: true },
+        { key: 'Enter' }, { key: ' ' }, { key: 'ArrowDown' }
+    ]) assert.equal(keyboard.keyDown(options).prevented, undefined);
+    keyboard.api.destroy();
+
+    const dialog = createHarness({ blockingUi: true });
+    dialog.storage.set('active-user-libraryPageSize', '0');
+    dialog.api.config.keyboardJumpMode = 'plain';
+    dialog.init();
+    assert.equal(dialog.keyDown({ key: 'A' }).prevented, undefined);
+    dialog.api.destroy();
+});
+
+test('Escape cancels Alpha Jump work without intercepting Escape from an input or dialog', async () => {
+    const input = createHarness({ loading: true });
+    input.storage.set('active-user-libraryPageSize', '0');
+    input.api.config.keyboardJumpMode = 'plain';
+    input.init();
+    assert.equal(input.keyDown({ key: 'A' }).prevented, true);
+    await turn();
+    const inputEscape = input.keyDown({ key: 'Escape', target: input.editableTarget('input') });
+    assert.equal(inputEscape.prevented, undefined);
+    assert.equal(inputEscape.stopped, undefined);
+    assert.equal(input.test.getState().run, null);
+    input.api.destroy();
+
+    const dialog = createHarness({ loading: true, blockingUi: true });
+    dialog.storage.set('active-user-libraryPageSize', '0');
+    dialog.init();
+    const pending = dialog.test.execute(dialog.test.getContext(), 'A');
+    await turn();
+    const dialogEscape = dialog.keyDown({ key: 'Escape' });
+    assert.equal(dialogEscape.prevented, undefined);
+    assert.equal(dialogEscape.stopped, undefined);
+    assert.equal(dialog.test.getState().run, null);
+    await pending;
+    dialog.api.destroy();
+});
+
+test('keyboard prefix cancels on loading changes, focus, blur, hidden tabs, destroy, and reinjection', async () => {
+    const h = createHarness({ loading: true, renderedCount: 8 });
+    h.storage.set('active-user-libraryPageSize', '0');
+    h.api.config.keyboardJumpMode = 'prefix';
+    h.init();
+    h.keyDown({ key: 'J', shiftKey: true });
+    assert.equal(h.keyDown({ key: 'A' }).prevented, true);
+    h.settings.Filters = { Genres: ['Drama'] };
+    h.persist();
+    h.test.refreshSurface();
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    assert.equal(h.test.getState().run, null);
+
+    h.keyDown({ key: 'J', shiftKey: true });
+    h.focusEditable(h.editableTarget('textarea'));
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.keyDown({ key: 'J', shiftKey: true });
+    h.blur();
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.keyDown({ key: 'J', shiftKey: true });
+    h.setVisibility('hidden');
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    h.setVisibility('visible');
+    h.keyDown({ key: 'J', shiftKey: true });
+    const replacement = createAlphaJump(h.root);
+    replacement.init();
+    assert.equal(h.test.getState().keyboard.prefix, null);
+    replacement.api.destroy();
+});
+
 test('Shows route uses series settings and Series cards and jumps without native filtering', async () => {
     const h = createHarness({ library: 'series' });
     const context = h.test.getContext();
@@ -695,7 +923,7 @@ test('Live TV, song lists, suggestions, and collection details remain native', (
 
 test('built-in Collections uses the distinct server configuration scope without a fabricated library id', async () => {
     const configuration = {
-        contractVersion: 2,
+        contractVersion: 3,
         scope: 'collections',
         libraryId: null,
         enabled: true,
@@ -790,7 +1018,7 @@ test('zero preference can own clicks but cannot declare partial cards ready', ()
 test('plugin mode validates a route-specific config before enabling automatic pagination setup', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 2,
+        contractVersion: 3,
         scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
@@ -811,7 +1039,7 @@ test('plugin mode validates a route-specific config before enabling automatic pa
 test('plugin config load failure does not fall back to standalone defaults or intercept clicks', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 2,
+        contractVersion: 3,
         scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
@@ -831,7 +1059,7 @@ test('plugin config load failure does not fall back to standalone defaults or in
 test('plugin mode retries a temporarily unavailable ApiClient and arms when it appears', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
     const configuration = {
-        contractVersion: 2,
+        contractVersion: 3,
         scope: 'library',
         libraryId: '01234567-89ab-cdef-0123-456789abcdef',
         enabled: true,
@@ -853,7 +1081,7 @@ test('plugin mode retries a temporarily unavailable ApiClient and arms when it a
 
 test('plugin config rejects a different normalized library ID', async () => {
     const configuration = {
-        contractVersion: 2,
+        contractVersion: 3,
         scope: 'library',
         libraryId: 'fedcba98-7654-3210-fedc-ba9876543210',
         enabled: true,
@@ -871,7 +1099,7 @@ test('plugin config rejects a different normalized library ID', async () => {
 
 test('plugin runtime recovery ignores unchanged code and reloads a safe changed fingerprint once', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'new', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, playbackExposed: true });
     h.init(); await turn();
@@ -888,7 +1116,7 @@ test('plugin runtime recovery ignores unchanged code and reloads a safe changed 
 
 test('a runtime response resolving after destroy or reinjection cannot show an update notice or reload', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     let resolveOld;
     const runtime = {
         initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
@@ -909,7 +1137,7 @@ test('a runtime response resolving after destroy or reinjection cannot show an u
 
 test('an unabortable runtime timeout remains outstanding instead of overlapping a second request', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     let resolveResponse;
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: new Promise(resolve => { resolveResponse = resolve; }) };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime });
@@ -929,7 +1157,7 @@ for (const [label, fingerprint, expectedReloads] of [
 ]) {
     test('restart recovery continues past an old runtime response and applies a ' + label, async () => {
         const routeLibraryId = '0123456789abcdef0123456789abcdef';
-        const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+        const configuration = { contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
         const runtime = {
             initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) },
             responses: [
@@ -953,7 +1181,7 @@ for (const [label, fingerprint, expectedReloads] of [
 
 test('delayed and replaced ApiClient instances subscribe once and clean up restart recovery', async () => {
     const routeLibraryId = '0123456789abcdef0123456789abcdef';
-    const configuration = { contractVersion: 2, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
+    const configuration = { contractVersion: 3, scope: 'library', libraryId: '01234567-89ab-cdef-0123-456789abcdef', enabled: true, libraryEnabled: true, autoDisablePagination: false, smoothScroll: false, debug: false };
     const runtime = { initial: { runtimeId: 'old', fingerprint: 'a'.repeat(64) }, response: { runtimeId: 'old', scriptFingerprint: 'a'.repeat(64), pluginVersion: '0.2.1.0' } };
     const h = createHarness({ pluginConfiguration: configuration, routeLibraryId, runtime, apiAvailable: false });
     h.init(); await turn();

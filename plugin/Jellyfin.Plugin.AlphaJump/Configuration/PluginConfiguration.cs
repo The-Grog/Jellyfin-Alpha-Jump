@@ -50,4 +50,11 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether browser debug messages are enabled.
     /// </summary>
     public bool Debug { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional browser keyboard shortcut mode. Missing legacy
+    /// XML values use the current Prefix default; unrecognized values remain
+    /// disabled.
+    /// </summary>
+    public string KeyboardJumpMode { get; set; } = KeyboardJumpModes.Prefix;
 }

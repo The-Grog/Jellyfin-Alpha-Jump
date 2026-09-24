@@ -31,6 +31,10 @@
         showsEnabled: true,
         smoothScroll: true,
         debug: false,
+        // Prefix is the default compatibility-friendly shortcut. Wire values
+        // are exact lower-case strings; invalid values still fail closed.
+        keyboardJumpMode: 'prefix',
+        keyboardPrefixTimeoutMs: 2000,
         respectSortOrder: true,
         // Bounds a native alphabet-clear replacement and initial readiness wait.
         maxReadyWaitMs: 8000,
@@ -119,6 +123,7 @@
         hashChange: null,
         popState: null,
         keyDown: null,
+        keyboard: { prefix: null, focusIn: null, blur: null, visibility: null },
         confirmedUnpaginatedQueryId: null,
         confirmedUnpaginatedTotal: null,
         activeUserId: null,
@@ -385,7 +390,7 @@
     function validatePluginConfiguration(payload, route) {
         const scope = pluginValue(payload, 'scope');
         if (!payload || typeof payload !== 'object'
-            || pluginValue(payload, 'contractVersion') !== 2
+            || pluginValue(payload, 'contractVersion') !== 3
             || scope !== route.configScope) {
             return null;
         }
@@ -396,7 +401,9 @@
         if (scope === 'collections' && pluginValue(payload, 'libraryId') != null) return null;
         const fields = ['enabled', 'libraryEnabled', 'autoDisablePagination', 'smoothScroll', 'debug'];
         if (fields.some(field => typeof pluginValue(payload, field) !== 'boolean')) return null;
-        return Object.fromEntries(fields.map(field => [field, pluginValue(payload, field)]));
+        const keyboardJumpMode = pluginValue(payload, 'keyboardJumpMode');
+        if (!['off', 'prefix', 'plain'].includes(keyboardJumpMode)) return null;
+        return { ...Object.fromEntries(fields.map(field => [field, pluginValue(payload, field)])), keyboardJumpMode };
     }
 
     function pluginMode() {
@@ -418,6 +425,7 @@
         CONFIG.autoDisablePagination = configuration.autoDisablePagination;
         CONFIG.smoothScroll = configuration.smoothScroll;
         CONFIG.debug = configuration.debug;
+        CONFIG.keyboardJumpMode = configuration.keyboardJumpMode;
     }
 
     function clearPluginReadinessRetry(routeKey = null) {
@@ -489,7 +497,7 @@
             promise: client.ajax({ type: 'GET', url, dataType: 'json' })
                 .then(payload => {
                     const configuration = validatePluginConfiguration(payload, route);
-                    if (!configuration) throw new Error('plugin configuration response did not match contract v2');
+                    if (!configuration) throw new Error('plugin configuration response did not match contract v3');
                     // A route can change while an authenticated request is in flight.
                     // Store only the response for the route that requested it.
                     state.plugin.routeKey = routeKey;
@@ -1163,6 +1171,86 @@
         return waitForReady(run);
     }
 
+    function keyboardMode() {
+        return ['off', 'prefix', 'plain'].includes(CONFIG.keyboardJumpMode)
+            ? CONFIG.keyboardJumpMode
+            : 'off';
+    }
+
+    function clearKeyboardPrefix(prefix = state.keyboard.prefix) {
+        if (!prefix || state.keyboard.prefix !== prefix) return;
+        if (prefix.timer) root.clearTimeout(prefix.timer);
+        prefix.notice?.remove();
+        state.keyboard.prefix = null;
+    }
+
+    function clearKeyboardPrefixIfStale(context = getContext()) {
+        const prefix = state.keyboard.prefix;
+        if (!prefix) return;
+        if (!context || !isPotentiallySupported(context)
+            || prefix.routeHash !== context.route.hash
+            || prefix.queryId !== context.queryId
+            || keyboardMode() !== 'prefix') clearKeyboardPrefix(prefix);
+    }
+
+    function showKeyboardPrefixNotice() {
+        const notice = doc.createElement('div');
+        notice.className = 'alpha-jump-keyboard-prefix';
+        notice.setAttribute('role', 'status');
+        notice.setAttribute('aria-live', 'polite');
+        notice.textContent = 'Jump to: A–Z / #';
+        notice.style.cssText = 'position:fixed;right:1rem;bottom:1rem;z-index:1201;padding:.35rem .55rem;background:var(--theme-background,rgba(0,0,0,.85));color:inherit;border-radius:.25rem;pointer-events:none;';
+        doc.body?.appendChild(notice);
+        return notice;
+    }
+
+    function armKeyboardPrefix(context) {
+        clearKeyboardPrefix();
+        const prefix = {
+            routeHash: context.route.hash,
+            queryId: context.queryId,
+            timer: null,
+            notice: showKeyboardPrefixNotice()
+        };
+        prefix.timer = root.setTimeout(() => clearKeyboardPrefix(prefix), CONFIG.keyboardPrefixTimeoutMs);
+        state.keyboard.prefix = prefix;
+    }
+
+    function elementIsEditableOrControl(element) {
+        if (!element || element.nodeType !== 1) return false;
+        if (element.isContentEditable) return true;
+        return !!element.closest?.('input, textarea, select, button, [contenteditable], [role="textbox"], [role="combobox"], [role="searchbox"], [role="spinbutton"], [role="button"], [role="menuitem"], [role="option"], [role="listbox"]');
+    }
+
+    // Jellyfin Web v12.1 legacy dialogs mount a .dialogContainer/.dialog and
+    // action-sheet backdrop. The ARIA checks additionally cover accessible
+    // dialogs without relying on unrelated page-level class names.
+    function blockingUiIsOpen() {
+        return !!doc.querySelector?.('.dialogContainer, .dialog, .dialogBackdrop, [role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]');
+    }
+
+    function keyboardEventIsEligible(event) {
+        if (!event || event.defaultPrevented || event.repeat || event.isComposing
+            || event.ctrlKey || event.altKey || event.metaKey
+            || event.getModifierState?.('AltGraph')
+            || elementIsEditableOrControl(event.target)
+            || elementIsEditableOrControl(doc.activeElement)
+            || blockingUiIsOpen()) return false;
+        return true;
+    }
+
+    function keyboardJumpValue(event) {
+        if (event.key === '#') return '#';
+        return typeof event.key === 'string' && /^[A-Za-z]$/.test(event.key)
+            ? event.key.toUpperCase()
+            : null;
+    }
+
+    function ownKeyboardEvent(event) {
+        event.preventDefault();
+        event.stopImmediatePropagation?.();
+    }
+
     async function execute(context, value) {
         const run = beginRun(context, value);
         announce(context, value === '#' ? 'Returning to the beginning…' : `Finding ${value}…`, true);
@@ -1202,6 +1290,84 @@
         }
     }
 
+    function activateJump(context, value) {
+        if (value === '#' && context.alphabetClear && isReady(context) && !state.run) {
+            scrollTop();
+            announce(context, 'At the beginning.', false);
+            return;
+        }
+        void execute(context, value);
+    }
+
+    function onKeyboardKeyDown(event) {
+        const prefix = state.keyboard.prefix;
+        if (event.key === 'Escape') {
+            // Escape may cancel Alpha Jump internally, but a text control or
+            // modal must retain its own Escape interaction and propagation.
+            const canOwnEscape = keyboardEventIsEligible(event);
+            if (prefix) {
+                if (canOwnEscape) ownKeyboardEvent(event);
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            if (state.run) {
+                if (canOwnEscape) ownKeyboardEvent(event);
+                cancelRun('Cancelled.', true);
+            }
+            return;
+        }
+
+        if (prefix) {
+            if (!keyboardEventIsEligible(event)) {
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            const context = getContext();
+            if (!context || !isPotentiallySupported(context)
+                || prefix.routeHash !== context.route.hash || prefix.queryId !== context.queryId
+                || keyboardMode() !== 'prefix') {
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            // Repeating the chord restarts its brief prefix window; it does not
+            // accidentally jump to J.
+            if (event.key === 'J' && event.shiftKey) {
+                ownKeyboardEvent(event);
+                armKeyboardPrefix(context);
+                return;
+            }
+            // On common layouts # is Shift+3, so preserve the armed prefix
+            // while the standalone modifier key is depressed.
+            if (event.key === 'Shift') return;
+            const value = keyboardJumpValue(event);
+            if (!value) {
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            ownKeyboardEvent(event);
+            clearKeyboardPrefix(prefix);
+            activateJump(context, value);
+            return;
+        }
+
+        if (!keyboardEventIsEligible(event)) return;
+        const context = getContext();
+        if (!context || !isPotentiallySupported(context)) return;
+        const mode = keyboardMode();
+        if (mode === 'prefix') {
+            if (event.key === 'J' && event.shiftKey) {
+                ownKeyboardEvent(event);
+                armKeyboardPrefix(context);
+            }
+            return;
+        }
+        if (mode !== 'plain') return;
+        const value = keyboardJumpValue(event);
+        if (!value) return;
+        ownKeyboardEvent(event);
+        activateJump(context, value);
+    }
+
     function onPickerClick(event) {
         const button = event.target.closest?.('button[type="button"][value]');
         if (!button || !state.picker?.group.contains(button) || !LETTERS.has(button.value)) return;
@@ -1215,13 +1381,7 @@
         if (!isPotentiallySupported(context)) return;
         event.preventDefault();
         event.stopImmediatePropagation();
-        const value = button.value;
-        if (value === '#' && isReady(context) && !state.run) {
-            scrollTop();
-            announce(context, 'At the beginning.', false);
-            return;
-        }
-        void execute(context, value);
+        activateJump(context, button.value);
     }
 
     function attachSurface(context) {
@@ -1252,6 +1412,7 @@
     }
 
     function detachSurface(removeFeedback) {
+        clearKeyboardPrefix();
         if (state.picker?.root && state.pickerClick) {
             state.picker.root.removeEventListener('click', state.pickerClick, true);
         }
@@ -1308,6 +1469,7 @@
         if (state.run && (!context || context.route.hash !== state.run.routeHash || context.queryId !== state.run.queryId)) {
             cancelRun('Cancelled: library query changed.', true);
         }
+        clearKeyboardPrefixIfStale(context);
         if (!isPotentiallySupported(context)) {
             detachSurface(true);
             applyPendingUpdate();
@@ -1351,21 +1513,27 @@
         state.plugin.marker = pluginMarker();
         startUpdateRecovery();
         state.hashChange = () => {
+            clearKeyboardPrefix();
             cancelRun('Cancelled: navigation changed.', false);
             scheduleLifecycle();
         };
         state.popState = state.hashChange;
         state.loadListener = () => scheduleLifecycle();
-        state.keyDown = event => {
-            if (event.key === 'Escape' && state.run) {
-                event.preventDefault();
-                cancelRun('Cancelled.', true);
-            }
+        state.keyDown = onKeyboardKeyDown;
+        state.keyboard.focusIn = event => {
+            if (elementIsEditableOrControl(event.target) || blockingUiIsOpen()) clearKeyboardPrefix();
+        };
+        state.keyboard.blur = () => clearKeyboardPrefix();
+        state.keyboard.visibility = () => {
+            if (doc.visibilityState !== 'visible') clearKeyboardPrefix();
         };
         root.addEventListener('hashchange', state.hashChange);
         root.addEventListener('popstate', state.popState);
         root.addEventListener('load', state.loadListener, { once: true });
+        root.addEventListener('blur', state.keyboard.blur);
         doc.addEventListener('keydown', state.keyDown, true);
+        doc.addEventListener('focusin', state.keyboard.focusIn, true);
+        doc.addEventListener('visibilitychange', state.keyboard.visibility);
         // Recover a missed first mount synchronously before React handles a letter.
         // Existing surface listeners still own normal clicks and native-clear bypass.
         state.firstPickerClick = event => {
@@ -1396,6 +1564,7 @@
         if (state.lifecycleFrame) root.cancelAnimationFrame(state.lifecycleFrame);
         clearPluginReadinessRetry();
         stopUpdateRecovery();
+        clearKeyboardPrefix();
         cancelRun(null, false);
         detachSurface(true);
         state.mountObserver?.disconnect();
@@ -1404,7 +1573,10 @@
         root.removeEventListener('popstate', state.popState);
         root.removeEventListener('load', state.loadListener);
         doc.removeEventListener('keydown', state.keyDown, true);
+        doc.removeEventListener('focusin', state.keyboard.focusIn, true);
+        doc.removeEventListener('visibilitychange', state.keyboard.visibility);
         doc.removeEventListener('click', state.firstPickerClick, true);
+        root.removeEventListener('blur', state.keyboard.blur);
         if (root[INSTANCE_KEY] === api) delete root[INSTANCE_KEY];
         log(reason);
     }
@@ -1440,6 +1612,10 @@
         detachSurface,
         refreshSurface,
         execute,
+        activateJump,
+        onKeyboardKeyDown,
+        keyboardMode,
+        clearKeyboardPrefix,
         waitForReady,
         checkForPluginUpdate,
         applyPendingUpdate,

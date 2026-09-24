@@ -19,6 +19,7 @@ public class LibrarySelectionTests
         Assert.True(defaults.AutoDisablePagination);
         Assert.True(defaults.SmoothScroll);
         Assert.False(defaults.Debug);
+        Assert.Equal(KeyboardJumpModes.Prefix, defaults.KeyboardJumpMode);
         Assert.Empty(defaults.LibrarySelections);
 
         var enabled = Guid.Parse("01234567-89ab-cdef-0123-456789abcdef");
@@ -26,6 +27,7 @@ public class LibrarySelectionTests
         var configuration = RoundTrip(new PluginConfiguration
         {
             BuiltInCollectionsEnabled = false,
+            KeyboardJumpMode = KeyboardJumpModes.Plain,
             LibrarySelections =
             [
                 new LibrarySelectionRecord { LibraryId = LibraryId.Normalize(enabled), Enabled = true },
@@ -36,6 +38,7 @@ public class LibrarySelectionTests
         Assert.True(LibrarySelection.IsEnabled(configuration, enabled));
         Assert.False(LibrarySelection.IsEnabled(configuration, disabled));
         Assert.False(configuration.BuiltInCollectionsEnabled);
+        Assert.Equal(KeyboardJumpModes.Plain, configuration.KeyboardJumpMode);
         configuration.Enabled = false;
         Assert.False(LibrarySelection.IsEnabled(configuration, enabled));
         Assert.True(LibrarySelection.IsSelectionEnabled(configuration, enabled));
@@ -93,6 +96,18 @@ public class LibrarySelectionTests
     }
 
     [Theory]
+    [InlineData(null, KeyboardJumpModes.Prefix)]
+    [InlineData("off", KeyboardJumpModes.Off)]
+    [InlineData("prefix", KeyboardJumpModes.Prefix)]
+    [InlineData("plain", KeyboardJumpModes.Plain)]
+    [InlineData("PREFIX", KeyboardJumpModes.Off)]
+    [InlineData("unexpected", KeyboardJumpModes.Off)]
+    public void KeyboardJumpModeNormalizesToExplicitFailClosedWireValues(string? input, string expected)
+    {
+        Assert.Equal(expected, KeyboardJumpModes.Normalize(input));
+    }
+
+    [Theory]
     [InlineData("books")]
     [InlineData("boxsets")]
     [InlineData("homevideos")]
@@ -140,6 +155,15 @@ public class LibrarySelectionTests
         Assert.False(liveTv.Supported);
         Assert.False(liveTv.Enabled);
         Assert.Contains("intentionally unsupported", liveTv.Explanation);
+    }
+
+    [Fact]
+    public void AdministratorConfigurationNormalizesInvalidKeyboardMode()
+    {
+        var response = AlphaJumpConfigurationService.ToAdministratorConfiguration(
+            new PluginConfiguration { KeyboardJumpMode = "invalid" }, []);
+
+        Assert.Equal(KeyboardJumpModes.Off, response.KeyboardJumpMode);
     }
 
     [Fact]

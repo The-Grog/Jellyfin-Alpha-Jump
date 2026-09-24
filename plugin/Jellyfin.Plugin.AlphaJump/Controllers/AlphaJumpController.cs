@@ -93,14 +93,15 @@ public sealed class AlphaJumpController : ControllerBase
             }
             Response.Headers.CacheControl = "no-store";
             return Ok(new ClientConfigurationDto(
-                ContractVersion: 2,
+                ContractVersion: 3,
                 Scope: responseScope,
                 LibraryId: responseLibraryId,
                 Enabled: configuration.Enabled,
                 LibraryEnabled: configuration.LibraryEnabled,
                 AutoDisablePagination: configuration.AutoDisablePagination,
                 SmoothScroll: configuration.SmoothScroll,
-                Debug: configuration.Debug));
+                Debug: configuration.Debug,
+                KeyboardJumpMode: configuration.KeyboardJumpMode));
         }
         catch (InvalidOperationException)
         {
@@ -156,7 +157,8 @@ public sealed record ClientConfigurationDto(
     bool LibraryEnabled,
     bool AutoDisablePagination,
     bool SmoothScroll,
-    bool Debug);
+    bool Debug,
+    string KeyboardJumpMode);
 
 /// <summary>Minimal cache-busting and update-recovery contract.</summary>
 public sealed record RuntimeInfoDto(string RuntimeId, string ScriptFingerprint, string PluginVersion);

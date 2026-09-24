@@ -5,7 +5,7 @@
     <title>Alpha Jump</title>
 </head>
 <body>
-    <div id="AlphaJumpConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+    <div id="AlphaJumpConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox,emby-select">
         <div data-role="content">
             <div class="content-primary">
                 <form id="AlphaJumpConfigForm">
@@ -49,6 +49,15 @@
                             <span>Enable browser debug logging</span>
                         </label>
                     </div>
+                    <div class="selectContainer">
+                        <label class="selectLabel" for="KeyboardJumpMode">Keyboard alphabet jump</label>
+                        <select id="KeyboardJumpMode" is="emby-select" class="emby-select-withcolor emby-select">
+                            <option value="prefix" selected>Prefix (recommended): Shift+J, then A-Z or #</option>
+                            <option value="off">Off</option>
+                            <option value="plain">Plain: A-Z or # directly</option>
+                        </select>
+                        <div class="fieldDescription">Prefix reduces conflicts with browser extensions and other plugins. Plain shortcuts can conflict; rebind or disable the conflicting shortcut if needed.</div>
+                    </div>
 
                     <h2 class="sectionTitle">Libraries</h2>
                     <p class="fieldDescription">Compatible library grids can be enabled individually. Live TV and views without a verified alphabet-picker grid remain disabled.</p>
@@ -75,6 +84,10 @@
                 function normalizeId(id) {
                     var compact = String(id || '').replace(/-/g, '').toLowerCase();
                     return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+                }
+                function normalizeKeyboardJumpMode(mode) {
+                    if (mode === undefined || mode === null) return 'prefix';
+                    return mode === 'prefix' || mode === 'plain' ? mode : 'off';
                 }
                 function readConfiguration() {
                     return ApiClient.ajax({
@@ -120,6 +133,7 @@
                         var camel = name.charAt(0).toLowerCase() + name.slice(1);
                         field(name).checked = configuration[name] !== undefined ? configuration[name] : configuration[camel] !== false;
                     });
+                    field('KeyboardJumpMode').value = normalizeKeyboardJumpMode(value(configuration, 'KeyboardJumpMode'));
                     renderLibraries(configuration);
                 }
                 function load() {
@@ -144,6 +158,7 @@
                     ['Enabled', 'AutoEnableNewSupportedLibraries', 'BuiltInCollectionsEnabled', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
                         configuration[name] = field(name).checked;
                     });
+                    configuration.KeyboardJumpMode = normalizeKeyboardJumpMode(field('KeyboardJumpMode').value);
                     configuration.LibrarySelections = [];
                         libraries.forEach(function (library) {
                             var id = normalizeId(value(library, 'LibraryId'));

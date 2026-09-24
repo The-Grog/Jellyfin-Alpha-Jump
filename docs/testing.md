@@ -4,6 +4,39 @@ Date: 2026-09-20 to 2026-09-23. Prototype commit under test: local working tree 
 
 Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
 
+## Optional keyboard alphabet jump — 2026-09-24
+
+Automated local coverage was added for the actual document capture listener and
+shared activation path, not a duplicate jump implementation. `node --check
+src/alpha-jump.js` and `node --test tests/alpha-jump.test.js` passed **94/94**.
+The tests cover Prefix/default and old-contract fail-closed behavior; Prefix arm,
+letter/# consumption (including standalone Shift then Shift-generated #),
+timeout, Escape, unrelated input, and repeated arming;
+Plain destination parity with pointer activation; uppercase and `#`; editing
+and focused-control guards; dialogs, modifiers, repeat, IME, normal keys;
+Escape cancels internal work without suppressing an input's or dialog's Escape;
+loading/query changes; focus, blur, visibility, destroy, and reinjection.
+
+The Release production build passed and the C# suite passed **31/31**. The
+suite includes XML round-trip preservation of the `prefix` default and explicit
+`plain`, plus server-side normalization of invalid wire values. The build
+reported only `NU1900` vulnerability-metadata retrieval warnings because this
+environment could not reach NuGet; it reported no compilation errors. These
+are local deterministic checks, not a served-plugin/dashboard/browser result.
+
+### Required keyboard browser checks (not run)
+
+1. Refresh a supported enabled grid after saving each dashboard mode, then
+   verify Off leaves A-Z/# native; Prefix uses Shift+J then a letter/# within
+   two seconds; Plain reaches the same first card as a pointer click.
+2. Verify keyboard events stay native in search/filter inputs, editable ARIA
+   controls, menus, dialogs/action sheets, and unsupported routes/layouts.
+3. Test Escape, blur, hidden visibility, navigation and a filter change while
+   Prefix is armed; its notice must disappear without moving focus.
+4. With Jellyfin Enhanced enabled and then disabled, record its exact version
+   and any shortcut conflict. Alpha Jump does not assert D/Q/R or Shift+H
+   compatibility until that source/version is verified.
+
 ## Expanded compatible-library registry — 2026-09-23
 
 The current local change expands the source-backed registry beyond Movies and

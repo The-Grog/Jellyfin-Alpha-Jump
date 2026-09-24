@@ -25,7 +25,8 @@ public sealed record ClientLibraryConfiguration(
     bool LibraryEnabled,
     bool AutoDisablePagination,
     bool SmoothScroll,
-    bool Debug);
+    bool Debug,
+    string KeyboardJumpMode);
 
 /// <summary>Administrator-facing plugin configuration and current server folders.</summary>
 public sealed record AdministratorConfiguration(
@@ -35,6 +36,7 @@ public sealed record AdministratorConfiguration(
     bool AutoDisablePagination,
     bool SmoothScroll,
     bool Debug,
+    string KeyboardJumpMode,
     IReadOnlyList<AdministratorLibrary> Libraries);
 
 /// <summary>One library rendered by the administrator page.</summary>
@@ -54,6 +56,7 @@ public sealed record AdministratorConfigurationUpdate(
     bool AutoDisablePagination,
     bool SmoothScroll,
     bool Debug,
+    string KeyboardJumpMode,
     IReadOnlyList<AdministratorLibrarySelectionUpdate>? LibrarySelections);
 
 /// <summary>One explicit administrator library choice.</summary>
