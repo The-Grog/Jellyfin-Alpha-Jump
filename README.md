@@ -187,13 +187,13 @@ Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 
 ## Keyboard shortcuts
 
-**Confirmed in use (2026-09-24):** the maintainer reports that both Prefix and Plain keyboard modes work well after the hidden-dialog fix. Retained hidden dialogs no longer block shortcuts; active dialogs and editing controls remain protected. This confirms the reported installation, not every browser/plugin combination.
-
 Keyboard support defaults to Prefix and uses the same jump path as clicking the native
 alphabet picker; it does not synthesize picker clicks. Prefix mode arms a
 small, non-focusable `Jump to: A–Z / #` status notice for two seconds.
 `Escape` cancels that prefix (or an already-running jump). Uppercase letters
 and `#` are accepted from `event.key` on layouts that emit those characters.
+
+Example: Shift+J then M jumps to the first M title.
 
 Alpha Jump leaves the event untouched unless it can prove a supported enabled
 grid and no text/control/modal interaction is underway. It never owns input,
