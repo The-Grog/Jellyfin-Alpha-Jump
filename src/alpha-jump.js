@@ -50,6 +50,7 @@
     const INSTANCE_KEY = '__alphaJumpPrototypeV1';
     const LETTERS = new Set(['#', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ']);
     const LOG_PREFIX = '[AlphaJump]';
+    const MANUAL_REFRESH_MESSAGE = 'Alpha Jump updated—refresh to apply.';
     // This registry is deliberately narrower than Jellyfin's route list. Each
     // entry is an ItemsView grid with a v12.1 route, tab, local-storage key,
     // and explicit rendered item contract. Suggestions, genres, people,
@@ -153,21 +154,33 @@
         const markers = Array.from(doc?.querySelectorAll?.('#alpha-jump-plugin-bootstrap') || [])
             .filter(marker => marker.getAttribute?.('data-alpha-jump-mode') === 'plugin');
         if (markers.length !== 1) return null;
-        const configUrl = markers[0].getAttribute('data-alpha-jump-config-url');
+
+        const marker = markers[0];
+        const configUrl = marker.getAttribute('data-alpha-jump-config-url');
         if (typeof configUrl !== 'string' || !configUrl) return null;
-        const runtimeUrl = markers[0].getAttribute('data-alpha-jump-runtime-url');
-        const runtimeId = markers[0].getAttribute('data-alpha-jump-runtime-id');
-        const fingerprint = markers[0].getAttribute('data-alpha-jump-script-fingerprint');
-        return { element: markers[0], configUrl, runtime: typeof runtimeUrl === 'string' && runtimeUrl && runtimeId && fingerprint ? { url: runtimeUrl, runtimeId, fingerprint } : null };
+
+        const runtimeUrl = marker.getAttribute('data-alpha-jump-runtime-url');
+        const runtimeId = marker.getAttribute('data-alpha-jump-runtime-id');
+        const fingerprint = marker.getAttribute('data-alpha-jump-script-fingerprint');
+        const runtime = typeof runtimeUrl === 'string' && runtimeUrl && runtimeId && fingerprint
+            ? { url: runtimeUrl, runtimeId, fingerprint }
+            : null;
+
+        return { element: marker, configUrl, runtime };
     }
 
     function validRuntime(value) {
-        return value && typeof value === 'object'
-            && typeof pluginValue(value, 'runtimeId') === 'string'
-            && /^[a-f0-9]{16,}$/i.test(pluginValue(value, 'scriptFingerprint'))
-            && typeof pluginValue(value, 'pluginVersion') === 'string'
-            ? { runtimeId: pluginValue(value, 'runtimeId'), fingerprint: pluginValue(value, 'scriptFingerprint'), version: pluginValue(value, 'pluginVersion') }
-            : null;
+        if (!value || typeof value !== 'object') return null;
+
+        const runtimeId = pluginValue(value, 'runtimeId');
+        const fingerprint = pluginValue(value, 'scriptFingerprint');
+        const version = pluginValue(value, 'pluginVersion');
+
+        if (typeof runtimeId !== 'string'
+            || !/^[a-f0-9]{16,}$/i.test(fingerprint)
+            || typeof version !== 'string') return null;
+
+        return { runtimeId, fingerprint, version };
     }
 
     function updateNotice(message) {
@@ -184,9 +197,15 @@
         }
         update.notice.replaceChildren(doc.createTextNode(message));
         const button = doc.createElement('button');
-        button.type = 'button'; button.textContent = 'Refresh'; button.style.cssText = 'margin-left:.5rem;';
+        button.type = 'button';
+        button.textContent = 'Refresh';
+        button.style.cssText = 'margin-left:.5rem;';
         button.addEventListener('click', () => root.location.reload());
         update.notice.appendChild(button);
+    }
+
+    function showManualRefreshNotice() {
+        updateNotice(MANUAL_REFRESH_MESSAGE);
     }
 
     function updateSafeToReload() {
@@ -205,13 +224,21 @@
     function applyPendingUpdate() {
         const update = state.plugin.update;
         if (state.destroyed || !update.pending) return;
-        if (!updateSafeToReload()) { updateNotice('Alpha Jump updated—refresh to apply.'); return; }
+        if (!updateSafeToReload()) {
+            showManualRefreshNotice();
+            return;
+        }
         const key = updateReloadKey(update.pending.fingerprint);
         try {
-            if (!key || root.sessionStorage?.getItem(key) === '1') { updateNotice('Alpha Jump updated—refresh to apply.'); return; }
+            if (!key || root.sessionStorage?.getItem(key) === '1') {
+                showManualRefreshNotice();
+                return;
+            }
             root.sessionStorage?.setItem(key, '1');
             root.location.reload();
-        } catch { updateNotice('Alpha Jump updated—refresh to apply.'); }
+        } catch {
+            showManualRefreshNotice();
+        }
     }
 
     function restartRecoveryActive() {
@@ -362,9 +389,10 @@
             || scope !== route.configScope) {
             return null;
         }
+        const libraryId = normalizeLibraryId(pluginValue(payload, 'libraryId'));
+        const routeLibraryId = normalizeLibraryId(route.parentId);
         if (scope === 'library'
-            && (normalizeLibraryId(pluginValue(payload, 'libraryId')) === null
-                || normalizeLibraryId(pluginValue(payload, 'libraryId')) !== normalizeLibraryId(route.parentId))) return null;
+            && (libraryId === null || libraryId !== routeLibraryId)) return null;
         if (scope === 'collections' && pluginValue(payload, 'libraryId') != null) return null;
         const fields = ['enabled', 'libraryEnabled', 'autoDisablePagination', 'smoothScroll', 'debug'];
         if (fields.some(field => typeof pluginValue(payload, field) !== 'boolean')) return null;
@@ -967,10 +995,16 @@
         }
     }
 
+    function scrollBehavior() {
+        return CONFIG.smoothScroll && !root.matchMedia('(prefers-reduced-motion: reduce)').matches
+            ? 'smooth'
+            : 'auto';
+    }
+
     function scrollTop() {
         root.scrollTo({
             top: 0,
-            behavior: CONFIG.smoothScroll && !root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'
+            behavior: scrollBehavior()
         });
     }
 
@@ -987,7 +1021,7 @@
         const destination = Math.max(0, root.scrollY + card.getBoundingClientRect().top - stickyOffset());
         root.scrollTo({
             top: destination,
-            behavior: CONFIG.smoothScroll && !root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto'
+            behavior: scrollBehavior()
         });
     }
 
