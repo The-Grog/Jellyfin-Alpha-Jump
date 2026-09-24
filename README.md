@@ -3,7 +3,7 @@
 Alpha Jump is an installable Jellyfin 12.1+ plugin for Jellyfin Web. In supported
 library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
-retaining the complete rendered library.
+retaining the complete rendered library. Jump with the alphabet picker or keyboard shortcuts.
 
 It preserves Jellyfin's renderer, appearance, playback, cards, and normal
 controls. Alpha Jump does not fetch items independently or replace the library
@@ -22,8 +22,9 @@ Any third-party fork that reuses the same GUID is not an official rename or succ
 - Supports only the explicit modern Jellyfin Web grids in the matrix below.
 - Scrolls to the first card whose rendered `data-prefix` begins with the chosen
   alphabet letter instead of applying Jellyfin's alphabet filter.
+- Offers keyboard shortcuts: **Prefix** (default) uses `Shift+J`, then a letter or `#` within two seconds; **Plain** jumps directly with a letter or `#`. Choose **Off** to disable shortcuts.
 - Keeps non-alphabet filters and search constraints intact.
-- Treats `A`–`Z` as stateless jump commands: repeated clicks repeat the jump
+- Treats `A`–`Z` as stateless jump commands: repeated clicks or keyboard commands repeat the jump
   without a persistent highlighted or selected letter. `#` returns to the top.
 
 ## Requirements
@@ -36,13 +37,13 @@ which means the browser loads the complete constrained library. This can have
 significant browser and performance implications for large libraries.
 
 If JellyTweaks controls Library Page Size, set its Library Page Size to `0` or
-disable JellyTweaks/all tweaks. A conflicting JellyTweaks page size can undo
+disable that conflicting tweak. A conflicting JellyTweaks page size can undo
 Alpha Jump's pagination setup after reload.
 
 ## Library and tab support
 
 This matrix is backed by the pinned Jellyfin Web 12.1 source and deterministic
-tests. It is **not** live-browser compatibility confirmation yet. All entries
+tests. The maintainer reports working pointer and keyboard jumps; this does not confirm every row in every browser. All entries
 still require grid layout, ascending `SortName`, explicit `StartIndex: 0`, one
 native picker, and a complete matching rendered-card result before scrolling.
 
@@ -86,7 +87,7 @@ layouts, sorts, DOM shapes, and card types fail closed.
 5. Open Alpha Jump's plugin settings and configure the supported libraries and
    options.
 
-The current repository manifest lists **v0.5.0.0**. Disable any existing Alpha Jump JavaScript Injector entry before using the plugin. After installation/restart, refresh open Jellyfin Web tabs to load the script.
+The current repository manifest lists **v0.5.0.1**. Disable any existing Alpha Jump JavaScript Injector entry before using the plugin. After installation/restart, refresh open Jellyfin Web tabs to load the script.
 
 ### Manual test installation
 
@@ -122,7 +123,7 @@ JellyTweaks can restore a nonzero page size after Alpha Jump reloads.
 
 Library choices use stable Jellyfin library IDs, so they survive a rename.
 
-Changing a plugin setting takes effect after a browser refresh. The keyboard
+After saving a plugin setting, refresh the Jellyfin Web tab where you are browsing to apply it to that session. The settings page displays a refresh reminder; already-open library tabs do not yet receive a settings-change prompt. The keyboard
 setting is global to Alpha Jump, not per library. If Plain conflicts with a
 different extension or plugin, rebind or disable that shortcut, or use Prefix
 mode instead.
@@ -186,7 +187,7 @@ Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 
 ## Keyboard shortcuts
 
-**Local fix (2026-09-24; Firefox confirmation pending):** a production-path regression reproduced Plain keyboard activation being blocked by a retained hidden Jellyfin dialog/backdrop. The guard now follows Jellyfin Web 12.1's dialog lifecycle instead of treating mounted nodes as active: `.hide`, hidden ancestors, `hidden`, `aria-hidden`, `display`, and `visibility` are inert; a visible dialog/action sheet, opening dialog, opened backdrop, or closing backdrop remains blocking. This is a locally tested defect correction, not proof that the retained node is the live Firefox cause. Pointer jumping remains unchanged.
+**Confirmed in use (2026-09-24):** the maintainer reports that both Prefix and Plain keyboard modes work well after the hidden-dialog fix. Retained hidden dialogs no longer block shortcuts; active dialogs and editing controls remain protected. This confirms the reported installation, not every browser/plugin combination.
 
 Keyboard support defaults to Prefix and uses the same jump path as clicking the native
 alphabet picker; it does not synthesize picker clicks. Prefix mode arms a
@@ -270,7 +271,7 @@ The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin
 
 The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
 
-Local validation on 2026-09-24 passed 94 JavaScript tests and 31 C# tests. The C# build/test run reported NU1900 because NuGet vulnerability metadata was unavailable. Automated checks do not establish served-browser compatibility.
+The latest recorded local validation in [docs/testing.md](docs/testing.md) passed 98 JavaScript tests and 31 C# tests. The C# build/test run reported NU1900 because NuGet vulnerability metadata was unavailable. Automated checks do not establish served-browser compatibility.
 
 To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Native clients remain outside this browser-only scope.
 
@@ -325,7 +326,7 @@ These are implementation records, not a compatibility claim.
 | Configuration and readiness are distinct | The prototype may set the signed-in user's client-local setting and reload once, but it scrolls only after the current result's toolbar/card equality and other view gates succeed; eligible loading states may queue a request. |
 | Jellyfin Enhanced remains a compatibility risk | With Jellyfin Enhanced active, an earlier zero-page-size observation exposed a virtualized region reporting `showing 0-500 of 4609 items` while the toolbar reported 1,538. The prototype only inspects rendered cards, so it cannot yet claim a complete constrained-query scan or acceptable performance under that plugin. |
 
-The target browser still has to validate served-DOM selectors, keyboard/capture event ordering, network parameters, cleared-filter timing, pagination-zero performance, and Jellyfin Enhanced coexistence. See [docs/feasibility.md](docs/feasibility.md) and [docs/testing.md](docs/testing.md).
+Pointer jumping and both keyboard modes have been reported working by the maintainer. Broader checks remain for individual library tabs, modal transitions, keyboard event ordering with other plugins, cleared-filter timing, large-library performance, and Jellyfin Enhanced coexistence. See [docs/feasibility.md](docs/feasibility.md) and [docs/testing.md](docs/testing.md).
 
 ## Limits
 
