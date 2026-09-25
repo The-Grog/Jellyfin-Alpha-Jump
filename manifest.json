@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/docs/images/alpha-jump-icon.png",
     "versions": [
       {
+        "version": "0.5.1.0",
+        "changelog": "## What's Changed\n* chore: update manifest for v0.5.0.1 by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/10\n\n\n**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.5.0.1...v0.5.1.0",
+        "targetAbi": "12.1.0.0",
+        "sourceUrl": "https://github.com/The-Grog/Jellyfin-Alpha-Jump/releases/download/v0.5.1.0/alpha-jump_0.5.1.0.zip",
+        "checksum": "65f874a8a323bbe3911bdc3bac32be48",
+        "timestamp": "2026-09-25T01:52:30Z"
+      },
+      {
         "version": "0.5.0.1",
         "changelog": "## What's Changed\n* chore: update manifest for v0.5.0.0 by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/8\n\n\n**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.5.0.0...v0.5.0.1",
         "targetAbi": "12.1.0.0",
