@@ -3,7 +3,8 @@
 Alpha Jump is an installable Jellyfin 12.1+ plugin for Jellyfin Web. In supported
 library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
-retaining the complete rendered library. Jump with the alphabet picker or keyboard shortcuts.
+retaining the complete rendered library - Plex like scrolling now in Jellyfin. 
+Jump with the alphabet picker or keyboard shortcuts.
 
 It preserves Jellyfin's renderer, appearance, playback, cards, and normal
 controls. Alpha Jump does not fetch items independently or replace the library
