@@ -11,7 +11,7 @@ activation path, not a duplicate jump implementation. A new failing regression
 first reproduced the retained-hidden-dialog defect: a mounted hidden
 `.dialogContainer` made Plain `A` stay native. After the source-backed guard
 change, `node --check src/alpha-jump.js` and `node --test
-tests/alpha-jump.test.js` passed **98/98**.
+tests/alpha-jump.test.js` passed **101/101**.
 The tests cover Prefix/default and old-contract fail-closed behavior; Prefix arm,
 letter/# consumption (including standalone Shift then Shift-generated #),
 timeout, Escape, unrelated input, and repeated arming;
@@ -23,6 +23,13 @@ opening, closing, action-sheet, and ARIA dialog states in both keyboard modes;
 Escape cancels internal work without suppressing an input's or dialog's Escape;
 loading/query changes; focus, blur, visibility, destroy, and reinjection.
 
+The handler regression harness counts actual document modal queries and page
+card queries. It proves that Off mode, unsupported routes, irrelevant keys,
+handled/modifier/repeat/IME events, editable targets, unowned Escape, and armed
+unrelated-key cancellation do not perform either scan. Eligible Plain and
+Prefix chords still perform both safety checks before the shared jump path.
+This establishes control flow only; no browser performance measurement was run.
+
 The guard is based on Jellyfin Web 12.1 `dialogHelper`: dialogs begin with
 `.hide`, become active when that class is removed, and the backdrop gains
 `.dialogBackdropOpened`; close restores `.hide` before the paired backdrop is
@@ -30,6 +37,13 @@ removed. Opacity alone is not used. This is local source/test evidence only.
 The exact retained node in the maintainer's Firefox session and the resulting
 shortcut behavior remain untested. No matching Jellyfin Enhanced source was
 available locally, so its coexistence is still a browser check.
+
+Closing-backdrop detection intentionally accepts only the pinned source order:
+the backdrop is the immediate sibling before its own `.dialogContainer`.
+Regression coverage includes that order, multiple retained dialogs, and an
+intervening sibling. The ambiguous sibling case remains native instead of being
+paired with another dialog; the private maintainer TODO records that upgrade or
+extension compatibility limit.
 
 The Release production build passed and the C# suite passed **31/31**. The
 suite includes XML round-trip preservation of the `prefix` default and explicit
@@ -46,6 +60,8 @@ are local deterministic checks, not a served-plugin/dashboard/browser result.
 2. While an action sheet/dialog is opening, open, and closing, verify both
    modes remain native. Once it is fully closed, verify shortcuts work again;
    repeat with an ordinary retained hidden dialog/backdrop if one is present.
+   If an extension changes the backdrop/container sibling order, record that
+   shape: the current closing-window association deliberately does not guess.
 3. Verify keyboard events stay native in search/filter inputs, editable ARIA
    controls, menus, and unsupported routes/layouts. Test Prefix `Shift+J`,
    release, then `Shift+3`/`#` on the actual keyboard layout.

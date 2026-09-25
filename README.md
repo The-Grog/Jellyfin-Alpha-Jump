@@ -187,6 +187,11 @@ Unsupported or uncertain states keep Jellyfin's normal alphabet behavior.
 
 ## Keyboard shortcuts
 
+The handler first rejects Off mode, irrelevant/handled keys, modifier/IME/repeat
+events, editable controls, and unsupported routes before it inspects dialogs or
+collects rendered cards. Candidate shortcuts still perform the full safety
+checks. Query-count regressions verify that control flow only; it is not a
+measured browser-performance claim.
 Keyboard support defaults to Prefix and uses the same jump path as clicking the native
 alphabet picker; it does not synthesize picker clicks. Prefix mode arms a
 small, non-focusable `Jump to: A–Z / #` status notice for two seconds.

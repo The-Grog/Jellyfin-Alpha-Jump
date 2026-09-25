@@ -924,10 +924,13 @@
         return toolbarPending;
     }
 
-    function getContext() {
-        const route = routeInfo();
+    function getContext(route = routeInfo()) {
+        // Callers that only need to reject an unsupported route must not pay
+        // for a page/card lookup. The keyboard handler supplies its already
+        // checked route after cheap event filtering.
+        if (!route.supported) return null;
         const page = getPage(route);
-        if (!route.supported || !page) return null;
+        if (!page) return null;
         const settings = readViewSettings(route);
         const picker = findPicker(page);
         const toolbar = findLibraryToolbar();
@@ -1249,8 +1252,10 @@
     function backdropIsClosingDialog(backdrop) {
         // dialogHelper removes dialogBackdropOpened first and then removes the
         // backdrop after 300ms. During that closing window the preceding
-        // backdrop is paired with a still-mounted .dialogContainer whose
-        // dialog has regained .hide.
+        // backdrop is paired with the immediately following .dialogContainer
+        // whose dialog has regained .hide. This follows dialogHelper's exact
+        // insertBefore(backdrop, dialogContainer) structure. Do not search for
+        // another container: an intervening sibling makes ownership ambiguous.
         const container = backdrop?.nextElementSibling;
         if (!hasClass(container, 'dialogContainer') || !isConnectedAndVisible(container)) return false;
         return Array.from(container.querySelectorAll?.('.dialog, [role="dialog"], [role="alertdialog"]') || [])
@@ -1287,14 +1292,17 @@
             .some(dialogNodeIsActive);
     }
 
-    function keyboardEventIsEligible(event) {
+    function keyboardEventIsCheaplyEligible(event) {
         if (!event || event.defaultPrevented || event.repeat || event.isComposing
             || event.ctrlKey || event.altKey || event.metaKey
             || event.getModifierState?.('AltGraph')
             || elementIsEditableOrControl(event.target)
-            || elementIsEditableOrControl(doc.activeElement)
-            || blockingUiIsOpen()) return false;
+            || elementIsEditableOrControl(doc.activeElement)) return false;
         return true;
+    }
+
+    function keyboardEventIsEligible(event) {
+        return keyboardEventIsCheaplyEligible(event) && !blockingUiIsOpen();
     }
 
     function keyboardJumpValue(event) {
@@ -1307,6 +1315,19 @@
     function ownKeyboardEvent(event) {
         event.preventDefault();
         event.stopImmediatePropagation?.();
+    }
+
+    function keyboardIntent(event, mode, prefix) {
+        if (prefix) {
+            if (event.key === 'J' && event.shiftKey) return 'restart-prefix';
+            // On common layouts # is Shift+3. This is intentionally an armed
+            // prefix intent rather than an unrelated key, so it keeps the
+            // existing Shift-generated # behavior and its safety checks.
+            if (event.key === 'Shift') return 'hold-prefix';
+            return keyboardJumpValue(event) ? 'jump' : null;
+        }
+        if (mode === 'prefix') return event.key === 'J' && event.shiftKey ? 'arm-prefix' : null;
+        return mode === 'plain' && keyboardJumpValue(event) ? 'jump' : null;
     }
 
     async function execute(context, value) {
@@ -1360,6 +1381,9 @@
     function onKeyboardKeyDown(event) {
         const prefix = state.keyboard.prefix;
         if (event.key === 'Escape') {
+            // With nothing owned by Alpha Jump, Escape must be a no-work native
+            // path: do not inspect dialogs, cards, or the current route.
+            if (!prefix && !state.run) return;
             // Escape may cancel Alpha Jump internally, but a text control or
             // modal must retain its own Escape interaction and propagation.
             const canOwnEscape = keyboardEventIsEligible(event);
@@ -1375,55 +1399,54 @@
             return;
         }
 
+        const mode = keyboardMode();
         if (prefix) {
-            if (!keyboardEventIsEligible(event)) {
+            if (mode !== 'prefix') {
                 clearKeyboardPrefix(prefix);
                 return;
             }
-            const context = getContext();
+            const intent = keyboardIntent(event, mode, prefix);
+            if (!intent || !keyboardEventIsCheaplyEligible(event)) {
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            const route = routeInfo();
+            if (!route.supported || blockingUiIsOpen()) {
+                clearKeyboardPrefix(prefix);
+                return;
+            }
+            const context = getContext(route);
             if (!context || !isPotentiallySupported(context)
-                || prefix.routeHash !== context.route.hash || prefix.queryId !== context.queryId
-                || keyboardMode() !== 'prefix') {
+                || prefix.routeHash !== context.route.hash || prefix.queryId !== context.queryId) {
                 clearKeyboardPrefix(prefix);
                 return;
             }
             // Repeating the chord restarts its brief prefix window; it does not
             // accidentally jump to J.
-            if (event.key === 'J' && event.shiftKey) {
+            if (intent === 'restart-prefix') {
                 ownKeyboardEvent(event);
                 armKeyboardPrefix(context);
                 return;
             }
-            // On common layouts # is Shift+3, so preserve the armed prefix
-            // while the standalone modifier key is depressed.
-            if (event.key === 'Shift') return;
-            const value = keyboardJumpValue(event);
-            if (!value) {
-                clearKeyboardPrefix(prefix);
-                return;
-            }
+            if (intent === 'hold-prefix') return;
             ownKeyboardEvent(event);
             clearKeyboardPrefix(prefix);
-            activateJump(context, value);
+            activateJump(context, keyboardJumpValue(event));
             return;
         }
 
-        if (!keyboardEventIsEligible(event)) return;
-        const context = getContext();
+        // Off and irrelevant keys are intentionally no-work paths. In
+        // particular, ordinary typing does not enumerate dialogs or cards.
+        if (mode === 'off') return;
+        const intent = keyboardIntent(event, mode, null);
+        if (!intent || !keyboardEventIsCheaplyEligible(event)) return;
+        const route = routeInfo();
+        if (!route.supported || blockingUiIsOpen()) return;
+        const context = getContext(route);
         if (!context || !isPotentiallySupported(context)) return;
-        const mode = keyboardMode();
-        if (mode === 'prefix') {
-            if (event.key === 'J' && event.shiftKey) {
-                ownKeyboardEvent(event);
-                armKeyboardPrefix(context);
-            }
-            return;
-        }
-        if (mode !== 'plain') return;
-        const value = keyboardJumpValue(event);
-        if (!value) return;
         ownKeyboardEvent(event);
-        activateJump(context, value);
+        if (intent === 'arm-prefix') armKeyboardPrefix(context);
+        else activateJump(context, keyboardJumpValue(event));
     }
 
     function onPickerClick(event) {

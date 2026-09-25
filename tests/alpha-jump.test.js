@@ -119,7 +119,7 @@ class FakeElement {
     }
 }
 
-function createDialogFixture({ state = 'open', kind = 'dialog', empty = false, hiddenAncestor = false } = {}) {
+function createDialogFixture({ state = 'open', kind = 'dialog', empty = false, hiddenAncestor = false, interveningSibling = false } = {}) {
     const wrapper = new FakeElement();
     const container = new FakeElement();
     container.classList.add('dialogContainer');
@@ -158,6 +158,7 @@ function createDialogFixture({ state = 'open', kind = 'dialog', empty = false, h
     if (empty) backdrop.hidden = true;
     if (!empty) container.appendChild(dialog);
     wrapper.appendChild(backdrop);
+    if (interveningSibling) wrapper.appendChild(new FakeElement({ selectors: ['.test-intervening-sibling'] }));
     wrapper.appendChild(container);
     return { wrapper, container, dialog, backdrop };
 }
@@ -221,6 +222,11 @@ function createHarness({
     const pageId = view.pageId;
     const observers = [];
     const scrollCalls = [];
+    const queryCounts = new Map();
+    const recordQuery = (scope, selector) => {
+        const key = `${scope}:${selector}`;
+        queryCounts.set(key, (queryCounts.get(key) || 0) + 1);
+    };
     const settings = {
         StartIndex: 0,
         ViewMode: 'grid',
@@ -257,6 +263,11 @@ function createHarness({
     page.childrenBySelector.set('.alphaPicker-fixed-right', [pickerRoot]);
     page.childrenBySelector.set('.itemsContainer .card', cards);
     page.childrenBySelector.set('.noItemsMessage.centerMessage', []);
+    const pageQuerySelectorAll = page.querySelectorAll.bind(page);
+    page.querySelectorAll = selector => {
+        recordQuery('page', selector);
+        return pageQuerySelectorAll(selector);
+    };
 
     const documentListeners = new Map();
     const documentListenerSets = new Map();
@@ -292,6 +303,7 @@ function createHarness({
         visibilityState: visibility,
         activeElement: null,
         querySelectorAll: selector => {
+            recordQuery('document', selector);
             if (selector === '#' + pageId) return [page];
             if (selector === '.MuiToolbar-root') return [toolbar];
             if (selector === '[role="banner"], .MuiAppBar-root') return [];
@@ -482,7 +494,9 @@ function createHarness({
         focusEditable: target => { document.activeElement = target; documentListeners.get('focusin')?.({ target }); },
         get runtimeCalls() { return runtimeCalls; },
         ajaxRequests,
-        get reloads() { return reloads; }
+        get reloads() { return reloads; },
+        resetQueryCounts: () => queryCounts.clear(),
+        queryCount: (scope, selector) => queryCounts.get(`${scope}:${selector}`) || 0
     };
 }
 
@@ -493,6 +507,14 @@ function enableKeyboard(harness, mode) {
     harness.storage.set('active-user-libraryPageSize', '0');
     harness.api.config.keyboardJumpMode = mode;
     harness.init();
+}
+
+const KEYBOARD_MODAL_QUERY = '.dialogContainer, .dialog, .dialogBackdrop, [role="dialog"], [role="alertdialog"]';
+const RENDERED_CARD_QUERY = '.itemsContainer .card';
+
+function assertNoKeyboardDomScan(harness, message) {
+    assert.equal(harness.queryCount('document', KEYBOARD_MODAL_QUERY), 0, message);
+    assert.equal(harness.queryCount('page', RENDERED_CARD_QUERY), 0, message);
 }
 
 function assertNoPersistentAlphaJumpMarker(harness) {
@@ -872,6 +894,73 @@ test('Plain keyboard mode matches picker destination semantics and rejects editi
     dialog.api.destroy();
 });
 
+test('keyboard no-work paths avoid modal and rendered-card scans', () => {
+    const off = createHarness({ dialogFixtures: [{ state: 'open' }] });
+    enableKeyboard(off, 'off');
+    off.resetQueryCounts();
+    assert.equal(off.keyDown({ key: 'A' }).prevented, undefined);
+    assertNoKeyboardDomScan(off, 'Off');
+    off.api.destroy();
+
+    const unsupported = createHarness({ library: 'livetv', dialogFixtures: [{ state: 'open' }] });
+    enableKeyboard(unsupported, 'plain');
+    unsupported.resetQueryCounts();
+    assert.equal(unsupported.keyDown({ key: 'A' }).prevented, undefined);
+    assertNoKeyboardDomScan(unsupported, 'unsupported route');
+    assert.equal(unsupported.queryCount('document', '#' + unsupported.view.pageId), 0);
+    unsupported.api.destroy();
+
+    const plain = createHarness({ dialogFixtures: [{ state: 'open' }] });
+    enableKeyboard(plain, 'plain');
+    for (const event of [
+        { key: 'ArrowDown' },
+        { key: 'A', target: plain.editableTarget('input') },
+        { key: 'A', defaultPrevented: true },
+        { key: 'A', ctrlKey: true }, { key: 'A', altKey: true },
+        { key: 'A', metaKey: true }, { key: 'A', altGraph: true },
+        { key: 'A', repeat: true },
+        { key: 'A', isComposing: true }
+    ]) {
+        plain.resetQueryCounts();
+        assert.equal(plain.keyDown(event).prevented, undefined);
+        assertNoKeyboardDomScan(plain, JSON.stringify(event));
+    }
+    plain.resetQueryCounts();
+    assert.equal(plain.keyDown({ key: 'Escape' }).prevented, undefined);
+    assertNoKeyboardDomScan(plain, 'unowned Escape');
+    plain.api.destroy();
+
+    const armedHidden = createHarness({ dialogFixtures: [{ state: 'hidden' }] });
+    enableKeyboard(armedHidden, 'prefix');
+    assert.equal(armedHidden.keyDown({ key: 'J', shiftKey: true }).prevented, true);
+    armedHidden.resetQueryCounts();
+    assert.equal(armedHidden.keyDown({ key: '!' }).prevented, undefined);
+    assert.equal(armedHidden.test.getState().keyboard.prefix, null);
+    assertNoKeyboardDomScan(armedHidden, 'armed unrelated key');
+    armedHidden.api.destroy();
+});
+
+test('eligible Plain and Prefix shortcuts perform safety checks before using the shared jump path', async () => {
+    const plain = createHarness({ prefixes: ['AL', 'ZM'], dialogFixtures: [{ state: 'hidden' }] });
+    enableKeyboard(plain, 'plain');
+    plain.resetQueryCounts();
+    assert.equal(plain.keyDown({ key: 'A' }).prevented, true);
+    assert.ok(plain.queryCount('document', KEYBOARD_MODAL_QUERY) > 0);
+    assert.ok(plain.queryCount('page', RENDERED_CARD_QUERY) > 0);
+    await turn();
+    assert.equal(plain.scrollCalls.length, 1);
+    plain.api.destroy();
+
+    const prefix = createHarness({ prefixes: ['AL', 'ZM'], dialogFixtures: [{ state: 'hidden' }] });
+    enableKeyboard(prefix, 'prefix');
+    prefix.resetQueryCounts();
+    assert.equal(prefix.keyDown({ key: 'J', shiftKey: true }).prevented, true);
+    assert.ok(prefix.queryCount('document', KEYBOARD_MODAL_QUERY) > 0);
+    assert.ok(prefix.queryCount('page', RENDERED_CARD_QUERY) > 0);
+    assert.ok(prefix.test.getState().keyboard.prefix);
+    prefix.api.destroy();
+});
+
 test('a retained hidden Jellyfin dialog and backdrop do not block the production Plain keyboard path', async () => {
     const h = createHarness({
         prefixes: ['AL', 'ZM'],
@@ -927,6 +1016,34 @@ test('real Jellyfin dialog, action sheet, ARIA dialog, opening, and closing stat
         assert.equal(prefix.test.getState().keyboard.prefix, null, JSON.stringify(fixture));
         prefix.api.destroy();
     }
+});
+
+test('closing backdrops use only the pinned immediate container association', async () => {
+    const direct = createHarness({ dialogFixtures: [{ state: 'closing' }] });
+    enableKeyboard(direct, 'plain');
+    assert.equal(direct.keyDown({ key: 'A' }).prevented, undefined);
+    direct.api.destroy();
+
+    // Multiple retained dialogs remain safe when the closing backdrop is still
+    // immediately before its own container, as dialogHelper inserts it.
+    const multiple = createHarness({ dialogFixtures: [{ state: 'hidden' }, { state: 'closing' }] });
+    enableKeyboard(multiple, 'plain');
+    assert.equal(multiple.keyDown({ key: 'A' }).prevented, undefined);
+    multiple.api.destroy();
+
+    // An intervening sibling no longer proves which hidden dialog owns this
+    // non-opened backdrop. Do not guess by pairing it with another container:
+    // the retained elements are inert once their exact source association is
+    // ambiguous. The limitation is documented in private_todo.md.
+    const ambiguous = createHarness({
+        prefixes: ['AL', 'ZM'],
+        dialogFixtures: [{ state: 'closing', interveningSibling: true }, { state: 'hidden' }]
+    });
+    enableKeyboard(ambiguous, 'plain');
+    assert.equal(ambiguous.keyDown({ key: 'A' }).prevented, true);
+    await turn();
+    assert.equal(ambiguous.scrollCalls.length, 1);
+    ambiguous.api.destroy();
 });
 
 test('Prefix keyboard arms and jumps through retained inactive dialog nodes, including Shift+#', async () => {
