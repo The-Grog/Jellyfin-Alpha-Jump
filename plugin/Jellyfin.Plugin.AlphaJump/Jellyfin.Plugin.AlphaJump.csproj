@@ -16,10 +16,10 @@
   <!-- Jellyfin 12.1 publishes these plugin ABI packages at 12.1.0. Runtime
        assets stay with the server; the plugin must not ship its own copies. -->
   <ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="12.1.0">
+    <PackageReference Include="Jellyfin.Controller" Version="12.2.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="12.1.0">
+    <PackageReference Include="Jellyfin.Model" Version="12.2.0">
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
