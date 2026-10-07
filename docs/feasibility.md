@@ -44,6 +44,23 @@ The authorized Jellyfin 12.1 browser session later confirmed a saved-zero visual
 
 The local code is suitable for review and a controlled temporary-browser trial. That trial will change the signed-in user's browser/origin-local library page-size setting and reload once; a console copy must be pasted again afterward. It is not ready for general JavaScript Injector installation: automatic preference application/restoration, served-DOM gating, native-clear timing, network parameters, performance, and Enhanced coexistence still need evidence.
 
+## Jellyfin 12.2 compatibility update — 2026-10-07
+
+The next-release package ABI is upgraded together: production and test projects
+pin `Jellyfin.Controller` and `Jellyfin.Model` `12.2.0`, and release metadata
+uses `targetAbi` `12.2.0.0`. The existing 12.1-only package update proposals
+were not merged because partial Controller/Model changes fail the ABI guard.
+
+Official Jellyfin Web `v12.2` (`61b1f890365ad15138e943e694af723c1d47df2a`)
+was compared directly with `v12.1` for Alpha Jump's route/page, picker,
+rendered-card, page-size, and item-request surfaces. Those contracts remain
+compatible. `LibraryToolbar` was structurally rearranged and gained native
+Reset Filters, but it retained the pagination and pending-result semantics
+used by Alpha Jump's fail-closed guards. An authorized Jellyfin 12.2 Movies
+page also exposed the expected page, picker, and rendered-card contract; the
+maintainer reported successful manual testing there. This does not establish
+every supported tab or a new server-plugin lifecycle installation test.
+
 ## Server-plugin delivery finding — 2026-09-21
 
 Jellyfin Server 12.1's published `Jellyfin.Controller` and `Jellyfin.Model` projects identify package version `12.1.0` and target `net10.0`. The official plugin template establishes `BasePlugin<TConfiguration>`, `IHasWebPages`, embedded configuration pages, controller endpoints, and `IPluginServiceRegistrator` as supported plugin surfaces. A stock ASP.NET Core `IStartupFilter` is the available route for in-memory index transformation; Jellyfin does not provide a dedicated public Web-file transformation API.

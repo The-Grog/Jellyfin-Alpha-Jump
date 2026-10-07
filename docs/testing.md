@@ -4,6 +4,23 @@ Date: 2026-09-20 to 2026-09-24. Prototype commit under test: local working tree 
 
 Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
 
+## Jellyfin 12.2 compatibility validation — 2026-10-07
+
+The official Jellyfin Web `v12.2` source (`61b1f890365ad15138e943e694af723c1d47df2a`)
+was compared with `v12.1` for the contracts Alpha Jump uses. `ItemsView`,
+`LibraryPage`, `AlphabetPicker`, `libraryRoutes`, view constants,
+`userSettings.libraryPageSize()`, and `utils/items.ts` preserve the expected
+route/page IDs, picker behavior, zero-page-size request behavior, and rendered
+`data-prefix`/`data-type` card attributes. `LibraryToolbar` changes layout and
+adds Reset Filters without changing the page-size or pending-result contract.
+
+In the authorized Jellyfin 12.2 Movies tab, a read-only DOM check found one
+`#moviesPage`, the native 27-option picker, and 1,538 rendered cards with
+`data-prefix`. The maintainer separately reported successful manual testing in
+that server. No automated click, keyboard, network, playback, dashboard, or
+server-plugin lifecycle test was run in this session, so those remain distinct
+live checks.
+
 ## Optional keyboard alphabet jump — 2026-09-24
 
 Automated local coverage uses the actual document capture listener and shared

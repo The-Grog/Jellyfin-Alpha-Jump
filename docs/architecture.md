@@ -1,6 +1,6 @@
 # Unpaginated Alpha Jump architecture
 
-Date: 2026-09-20. Target source: Jellyfin Web `v12.1`, commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`.
+Date: 2026-09-20. Primary source: Jellyfin Web `v12.1`, commit `fae41f33eb7cd636a9ef68984adb82bb247a6e1b`. Compatibility re-audit: Jellyfin Web `v12.2`, commit `61b1f890365ad15138e943e694af723c1d47df2a`.
 
 ## Source evidence
 
@@ -15,6 +15,23 @@ Date: 2026-09-20. Target source: Jellyfin Web `v12.1`, commit `fae41f33eb7cd636a
 | Card/picker identity | `AlphabetPicker.tsx:37-88` renders the MUI toggle group; `LibraryPage.tsx` maps each library page ID; `src/utils/items.ts:159-183` emits `data-prefix`; the card builder emits `data-type`. | Identify the exact picker shape and match rendered `data-prefix` with `startsWith`, after every card satisfies the route's allowed type contract. |
 
 No private React context, query client, network interception, or independent item request is used.
+
+### Jellyfin Web 12.2 compatibility re-audit — 2026-10-07
+
+The official `v12.2` tree retains the Alpha Jump integration contracts in
+`ItemsView`, `LibraryPage`, `AlphabetPicker`, `libraryRoutes`, view constants,
+`userSettings.libraryPageSize()`, and `utils/items.ts`: zero still omits the
+request `limit`; card wrappers still receive `data-prefix` and `data-type`; and
+the same route/page IDs and tab mappings remain. The scoped v12.1-to-v12.2
+diff changed `LibraryToolbar` layout and added its native Reset Filters action,
+but retained its page-size/pending semantics. Its other scoped change was
+unrelated `stillWatchingPrompt` default behavior.
+
+An authorized served Jellyfin 12.2 Movies page exposed `#moviesPage`, its
+native 27-option picker, and 1,538 rendered `data-prefix` cards. The maintainer
+also reported manual pointer/keyboard testing on that server. This is useful
+served-browser evidence for that Movies page, not a replacement for controlled
+coverage of every registry row, update recovery, or server-plugin lifecycle.
 
 ## Support registry and readiness gates
 

@@ -22,7 +22,7 @@ jobs:
       PLUGIN_PROJECT: plugin/Jellyfin.Plugin.AlphaJump/Jellyfin.Plugin.AlphaJump.csproj
       TEST_PROJECT: plugin/Jellyfin.Plugin.AlphaJump.Tests/Jellyfin.Plugin.AlphaJump.Tests.csproj
       PLUGIN_DLL: Jellyfin.Plugin.AlphaJump.dll
-      TARGET_ABI: 12.1.0.0
+      TARGET_ABI: 12.2.0.0
     steps:
       - name: Determine tag
         id: tag

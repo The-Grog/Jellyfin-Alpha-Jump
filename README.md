@@ -1,7 +1,8 @@
 # Alpha Jump for Jellyfin
 
-Alpha Jump is an installable Jellyfin 12.1+ plugin for Jellyfin Web. In supported
-library grids, it changes the native alphabet picker from letter
+Alpha Jump is an installable Jellyfin plugin for Jellyfin Web. The current
+development branch targets the Jellyfin **12.2** plugin ABI; the published
+**v0.5.1.0** release remains targeted at 12.1. In supported library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
 retaining the complete rendered library - Plex like scrolling now in Jellyfin. 
 Jump with the alphabet picker or keyboard shortcuts.
@@ -30,7 +31,11 @@ Any third-party fork that reuses the same GUID is not an official rename or succ
 
 ## Requirements
 
-Alpha Jump requires Jellyfin **12.1 or later**, with behavior developed against Jellyfin Web 12.1. It needs Grid view, ascending Name/SortName, and an effective `StartIndex` of zero in a supported grid/tab.
+The next release built from this branch requires Jellyfin **12.2 or later**.
+Its browser integration was developed against Jellyfin Web 12.1 and re-audited
+against the official Web 12.2 source. Published **v0.5.1.0** remains the
+12.1-targeted release. Every version needs Grid view, ascending Name/SortName,
+and an effective `StartIndex` of zero in a supported grid/tab.
 
 The plugin configures the signed-in user's browser-local **Library page size**
 to `0` when that option is enabled. Jellyfin treats zero as unpaginated mode,
@@ -43,8 +48,10 @@ Alpha Jump's pagination setup after reload.
 
 ## Library and tab support
 
-This matrix is backed by the pinned Jellyfin Web 12.1 source and deterministic
-tests. The maintainer reports working pointer and keyboard jumps; this does not confirm every row in every browser. All entries
+This matrix is backed by the pinned Jellyfin Web 12.1 source, a targeted
+official Web 12.2 contract audit, and deterministic tests. The maintainer
+reports working pointer and keyboard jumps in Jellyfin 12.2; this does not
+confirm every row in every browser. All entries
 still require grid layout, ascending `SortName`, explicit `StartIndex: 0`, one
 native picker, and a complete matching rendered-card result before scrolling.
 
@@ -63,10 +70,10 @@ native picker, and a complete matching rendered-card result before scrolling.
 Downloaded YouTube videos are supported only by their configured Jellyfin
 collection type (for example Home Videos, Mixed, Movies, or Music Videos),
 never by matching a library's display name. Empty or `unknown` folder types
-are treated as Mixed only because Jellyfin Web 12.1 maps those types to its
+are treated as Mixed only because Jellyfin Web 12.1 and 12.2 map those types to its
 `#/mixed` page.
 
-Live TV and standalone Photos libraries are always native: pinned 12.1 source
+Live TV and standalone Photos libraries are always native: pinned 12.1 and 12.2 source
 marks `photosPage` unused, while the supported photo grids are the tabs of a
 Home Videos library. Suggestions, genres, studios/networks, people,
 authors/artists, songs, episodes/upcoming, media-library embedded playlists,
@@ -258,13 +265,14 @@ are maintained as supply-chain safeguards. See [SECURITY.md](SECURITY.md) for
 the private vulnerability-reporting process and [security controls](docs/security.md)
 for the maintainer policy.
 Release compatibility metadata is derived from the pinned Jellyfin
-Controller/Model package version. The current supported minimum is Jellyfin
-12.1 (`targetAbi` `12.1.0.0`); CI and the release workflow validate that this
-stays aligned with the manifest.
+Controller/Model package version. The current development minimum is Jellyfin
+12.2 (`targetAbi` `12.2.0.0`); released versions retain the ABI recorded in
+their manifest entry. CI and the release workflow validate that the next
+release stays aligned with its pinned packages.
 
 ## Plugin implementation notes
 
-The project at [plugin/Jellyfin.Plugin.AlphaJump](plugin/Jellyfin.Plugin.AlphaJump) targets the Jellyfin 12.1 plugin ABI (`net10.0`, `Jellyfin.Controller` and `Jellyfin.Model` `12.1.0`). It embeds [src/alpha-jump.js](src/alpha-jump.js) directly at build time; there is no plugin-maintained copy of the browser source.
+The project at [plugin/Jellyfin.Plugin.AlphaJump](plugin/Jellyfin.Plugin.AlphaJump) targets the Jellyfin 12.2 plugin ABI (`net10.0`, `Jellyfin.Controller` and `Jellyfin.Model` `12.2.0`). It embeds [src/alpha-jump.js](src/alpha-jump.js) directly at build time; there is no plugin-maintained copy of the browser source.
 
 It has a native Jellyfin dashboard configuration page with these defaults:
 
@@ -277,7 +285,7 @@ The dashboard uses an elevation-protected Alpha Jump endpoint backed by Jellyfin
 
 The plugin's early `IStartupFilter` sees the configured base URL before Jellyfin maps it, so it buffers only the Web index forms at either root or that prefix (for example, `/web/index.html` and `/jellyfin/web/index.html`). It then appends one idempotent bootstrap marker and same-origin script tag to an HTML `<head>`. It does not rewrite API, media, image, CSS, JavaScript, or other Web paths, and does not modify installed Jellyfin Web files. Because the index response is transformed, conditional validators are removed for that response and compression may be bypassed; this must be measured in a controlled server test.
 
-The latest recorded local validation in [docs/testing.md](docs/testing.md) passed 98 JavaScript tests and 31 C# tests. The C# build/test run reported NU1900 because NuGet vulnerability metadata was unavailable. Automated checks do not establish served-browser compatibility.
+The latest recorded local validation in [docs/testing.md](docs/testing.md) passed 101 JavaScript tests and 31 C# tests. Automated checks do not establish served-browser compatibility.
 
 To disable the installed plugin, use its global **Enable Alpha Jump** setting and refresh Web clients. Before removal, disable injection and use the existing `restorePagination()` procedure if restoring the browser-local page-size preference is wanted. Do not test the plugin while a JavaScript Injector Alpha Jump entry is also active. Native clients remain outside this browser-only scope.
 
