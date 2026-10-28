@@ -60,7 +60,7 @@ jobs:
       - name: Validate browser source
         run: |
           node --check src/alpha-jump.js
-          node --test tests/alpha-jump.test.js
+          node --test tests/*.test.js
           node scripts/validate-release-abi.js
 
       - name: Restore .NET dependencies
@@ -132,6 +132,18 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           token: ${{ github.token }}
 
+      - name: Select manifest branch before editing
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          branch="release-manifest/$TAG"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+            git switch --track -C "$branch" "origin/$branch"
+          else
+            git switch -c "$branch"
+          fi
+
       - name: Update manifest with the published asset
         env:
           VERSION: ${{ steps.tag.outputs.version }}
@@ -166,20 +178,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           branch="release-manifest/$TAG"
-          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-            git fetch origin "$branch"
-            git switch --track -C "$branch" "origin/$branch"
-          else
-            git switch -c "$branch"
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add manifest.json
           if git diff --staged --quiet; then
-            echo "Manifest already contains v${VERSION}; no pull request created."
-            exit 0
+            echo "Manifest already contains v${VERSION}. Ensuring pull request exists."
+          else
+            git commit -m "chore: update manifest for v${VERSION}"
           fi
-          git commit -m "chore: update manifest for v${VERSION}"
           git push origin "HEAD:refs/heads/$branch"
           if ! gh pr list --head "$branch" --base "${{ github.event.repository.default_branch }}" --state open --json url --jq '.[0].url' | grep -q .; then
             gh pr create --base "${{ github.event.repository.default_branch }}" --head "$branch" \

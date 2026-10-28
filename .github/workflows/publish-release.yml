@@ -34,4 +34,9 @@ jobs:
             '.[0].versions[] | select(.version == $version and .sourceUrl == $source_url and (.checksum | type == "string") and (.checksum | length > 0))' \
             manifest.json >/dev/null
           test "$(gh release view "$tag" --json isDraft --jq .isDraft)" = "true"
+          asset="alpha-jump_${version}.zip"
+          asset_dir="$(mktemp -d)"
+          trap 'rm -rf "$asset_dir"' EXIT
+          gh release download "$tag" --pattern "$asset" --pattern "$asset.sha256" --dir "$asset_dir"
+          node scripts/verify-release-assets.js manifest.json "$version" "$source_url" "$asset_dir/$asset" "$asset_dir/$asset.sha256"
           gh release edit "$tag" --draft=false

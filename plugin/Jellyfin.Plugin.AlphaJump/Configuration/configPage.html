@@ -64,7 +64,7 @@
                     <div id="AlphaJumpLibraries" class="verticalSection"></div>
                     <div id="AlphaJumpStatus" class="fieldDescription" role="status" aria-live="polite"></div>
                     <div>
-                        <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+                        <button is="emby-button" id="AlphaJumpSave" disabled type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
                     </div>
                 </form>
             </div>
@@ -77,6 +77,10 @@
                 var librariesRoot = document.querySelector('#AlphaJumpLibraries');
                 var status = document.querySelector('#AlphaJumpStatus');
                 var libraries = [];
+                var loaded = false;
+                var busy = false;
+                var saveButton = document.querySelector("#AlphaJumpSave");
+                function updateSaveState() { saveButton.disabled = busy || !loaded; }
 
                 function field(name) { return document.querySelector('#' + name); }
                 function value(item, name) { return item[name] !== undefined ? item[name] : item[name.charAt(0).toLowerCase() + name.slice(1)]; }
@@ -137,22 +141,30 @@
                     renderLibraries(configuration);
                 }
                 function load() {
+                    if (busy) return;
+                    loaded = false;
+                    busy = true;
+                    updateSaveState();
                     Dashboard.showLoadingMsg();
                     setStatus('');
                     return readConfiguration()
                         .then(function (configuration) {
                             libraries = value(configuration, 'Libraries') || [];
                             fill(configuration);
+                            loaded = true;
                         })
                         .catch(function () {
                             libraries = [];
                             librariesRoot.textContent = 'Could not read Alpha Jump configuration. Check that this page is opened by a Jellyfin administrator.';
                             setStatus('Configuration was not changed.');
                         })
-                        .finally(function () { Dashboard.hideLoadingMsg(); });
+                        .finally(function () { busy = false; updateSaveState(); Dashboard.hideLoadingMsg(); });
                 }
                 form.addEventListener('submit', function (event) {
                     event.preventDefault();
+                    if (busy || !loaded) return;
+                    busy = true;
+                    updateSaveState();
                     Dashboard.showLoadingMsg();
                     var configuration = {};
                     ['Enabled', 'AutoEnableNewSupportedLibraries', 'BuiltInCollectionsEnabled', 'AutoDisablePagination', 'SmoothScroll', 'Debug'].forEach(function (name) {
@@ -179,7 +191,7 @@
                         setStatus('Saved. Refresh a Jellyfin Web page to apply the changed browser configuration.');
                     }).catch(function () {
                         setStatus('Could not save Alpha Jump configuration.');
-                    }).finally(function () { Dashboard.hideLoadingMsg(); });
+                    }).finally(function () { busy = false; updateSaveState(); Dashboard.hideLoadingMsg(); });
                 });
                 page.addEventListener('pageshow', load);
             }());
