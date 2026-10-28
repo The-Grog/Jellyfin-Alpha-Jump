@@ -10,8 +10,8 @@
     <!-- The production plugin excludes Jellyfin runtime assemblies because the
          server supplies them. Tests run outside Jellyfin, so they need their
          own test-host copies. -->
-    <PackageReference Include="Jellyfin.Controller" Version="12.2.0" />
-    <PackageReference Include="Jellyfin.Model" Version="12.2.0" />
+    <PackageReference Include="Jellyfin.Controller" Version="12.4.0" />
+    <PackageReference Include="Jellyfin.Model" Version="12.4.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="xunit.v3" Version="4.0.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
