@@ -12,8 +12,8 @@ compatibility metadata and assets remain unchanged. See
 [the v0.5.2.0 release notes](docs/release-v0.5.2.0.md) for validation and remaining checks.
 
 Alpha Jump is an installable Jellyfin plugin for Jellyfin Web. The current
-development branch targets the Jellyfin **12.2** plugin ABI; the published
-**v0.5.1.0** release remains targeted at 12.1. In supported library grids, it changes the native alphabet picker from letter
+development branch targets the Jellyfin **12.2** plugin ABI. Published
+**v0.5.2.0** targets 12.2; **v0.5.1.0** targets 12.1. In supported library grids, it changes the native alphabet picker from letter
 filtering into a direct scroll to the first matching rendered title—while
 retaining the complete rendered library - Plex like scrolling now in Jellyfin. 
 Jump with the alphabet picker or keyboard shortcuts.
@@ -42,10 +42,13 @@ Any third-party fork that reuses the same GUID is not an official rename or succ
 
 ## Requirements
 
-The next release built from this branch requires Jellyfin **12.2 or later**.
+Alpha Jump v0.5.2.0 requires Jellyfin **12.2 or later**.
 Its browser integration was developed against Jellyfin Web 12.1 and re-audited
-against the official Web 12.2 source. Published **v0.5.1.0** remains the
-12.1-targeted release. Every version needs Grid view, ascending Name/SortName,
+against official Web 12.2 and 12.4 source. The maintainer reports successful
+testing of the existing release on their Jellyfin 12.4 instance. A temporary
+12.4 package build and tests also passed; no new plugin release is required.
+See [12.4 compatibility evidence](docs/compatibility-12.4.md). Published
+**v0.5.2.0** retains its 12.2 minimum and **v0.5.1.0** its 12.1 minimum. Every version needs Grid view, ascending Name/SortName,
 and an effective `StartIndex` of zero in a supported grid/tab.
 
 The plugin configures the signed-in user's browser-local **Library page size**
@@ -60,7 +63,7 @@ Alpha Jump's pagination setup after reload.
 ## Library and tab support
 
 This matrix is backed by the pinned Jellyfin Web 12.1 source, a targeted
-official Web 12.2 contract audit, and deterministic tests. The maintainer
+official Web 12.2/12.4 contract audit, and deterministic tests. The maintainer
 reports working pointer and keyboard jumps in Jellyfin 12.2; this does not
 confirm every row in every browser. All entries
 still require grid layout, ascending `SortName`, explicit `StartIndex: 0`, one

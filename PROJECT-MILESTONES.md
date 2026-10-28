@@ -1,6 +1,8 @@
 # Jellyfin Alpha Jump — milestone tracker and prompts
 
-Status: revised local Milestone 2 prototype created for review. Browser validation remains gated on the runtime evidence in `docs/feasibility.md` and `docs/testing.md`.
+Current status (2026-10-28): server plugin v0.5.2.0 is published for Jellyfin 12.2. The maintainer reports successful testing on Jellyfin 12.4. A temporary 12.4 package build, 31 C# tests, and 103 Node tests passed; package pins and minimum ABI remain at 12.2. See [the compatibility record](docs/compatibility-12.4.md).
+
+The original milestone plan below is historical; later implementation and release records supersede its prototype-only scope.
 
 Goal: change the Movies alphabet picker from filtering by letter to jumping within the items matching the current non-alphabet filters, while preserving Jellyfin's existing appearance and renderer.
 
