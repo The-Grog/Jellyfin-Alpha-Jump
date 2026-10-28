@@ -1,13 +1,13 @@
 # Alpha Jump for Jellyfin
 
-## Next release: v0.5.2.0 (unreleased)
+## v0.5.2.0
 
-The next release targets Jellyfin **12.2 or later**. It protects dashboard settings
+This release targets Jellyfin **12.2 or later**. It protects dashboard settings
 from failed-load or duplicate submissions, verifies draft ZIP checksums before
 publication, and makes release-manifest retries preserve the branch and ensure
 a pull request exists even when no new commit is needed.
 
-This is the development target, not a published upgrade. Existing release
+Published through the draft/manifest workflow. Historical release
 compatibility metadata and assets remain unchanged. See
 [the v0.5.2.0 release notes](docs/release-v0.5.2.0.md) for validation and remaining checks.
 
