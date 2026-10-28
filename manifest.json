@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/docs/images/alpha-jump-icon.png",
     "versions": [
       {
+        "version": "0.5.2.0",
+        "changelog": "## What's Changed\n* chore: update manifest for v0.5.1.0 by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/11\n* Bump the github-actions group with 2 updates by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/12\n* chore: target Jellyfin 12.2 ABI by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/17\n* Bump xunit.runner.visualstudio from 4.0.0 to 4.0.1 by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/18\n* Bump xunit.v3 from 4.0.1 to 4.0.2 by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/19\n* Bump Microsoft.NET.Test.Sdk from 18.10.1 to 18.11.0 by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/20\n* Bump the github-actions group with 3 updates by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/21\n* Bump the github-actions group with 2 updates by @dependabot[bot] in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/22\n* Prepare v0.5.2.0: settings and release guards by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/23\n\n\n**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.5.1.0...v0.5.2.0",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/The-Grog/Jellyfin-Alpha-Jump/releases/download/v0.5.2.0/alpha-jump_0.5.2.0.zip",
+        "checksum": "a28c97f64403e7c47d826bdfad029eb1",
+        "timestamp": "2026-10-28T04:10:46Z"
+      },
+      {
         "version": "0.5.1.0",
         "changelog": "## What's Changed\n* chore: update manifest for v0.5.0.1 by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/10\n\n\n**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.5.0.1...v0.5.1.0",
         "targetAbi": "12.1.0.0",
