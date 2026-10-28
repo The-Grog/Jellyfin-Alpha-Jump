@@ -9,6 +9,14 @@
     "imageUrl": "https://raw.githubusercontent.com/The-Grog/Jellyfin-Alpha-Jump/main/docs/images/alpha-jump-icon.png",
     "versions": [
       {
+        "version": "0.5.2.0",
+        "changelog": "# v0.5.2.0\n\nRequires Jellyfin 12.2 (ABI 12.2.0.0). Users on Jellyfin 12.1 should remain on v0.5.1.0.\n\n- Protect dashboard settings against failed configuration loads and duplicate saves.\n- Verify release ZIPs against both manifest MD5 and SHA-256 sidecars before publication.\n- Improve release-manifest branch retry and missing-PR recovery.\n- Update dependency and GitHub Actions versions.\n\nPrefix and Plain keyboard shortcuts remain supported; keyboard and backdrop behavior is unchanged in this release.\n\nValidation: 103 Node tests, hosted .NET build/tests, ABI checks, and CodeQL passed. Served-browser checks were not rerun for this release. No server installation or restart was performed.",
+        "targetAbi": "12.2.0.0",
+        "sourceUrl": "https://github.com/The-Grog/Jellyfin-Alpha-Jump/releases/download/v0.5.2.0/alpha-jump_0.5.2.0.zip",
+        "checksum": "a28c97f64403e7c47d826bdfad029eb1",
+        "timestamp": "2026-10-28T04:10:46Z"
+      },
+      {
         "version": "0.5.1.0",
         "changelog": "## What's Changed\n* chore: update manifest for v0.5.0.1 by @The-Grog in https://github.com/The-Grog/Jellyfin-Alpha-Jump/pull/10\n\n\n**Full Changelog**: https://github.com/The-Grog/Jellyfin-Alpha-Jump/compare/v0.5.0.1...v0.5.1.0",
         "targetAbi": "12.1.0.0",
