@@ -14,8 +14,16 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Server ABI upgrades must be coordinated manually with release metadata.
+    ignore:
+      - dependency-name: Jellyfin.Controller
+      - dependency-name: Jellyfin.Model
   - package-ecosystem: nuget
     directory: /plugin/Jellyfin.Plugin.AlphaJump.Tests
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Server ABI upgrades must be coordinated manually with release metadata.
+    ignore:
+      - dependency-name: Jellyfin.Controller
+      - dependency-name: Jellyfin.Model
