@@ -109,7 +109,7 @@ layouts, sorts, DOM shapes, and card types fail closed.
 5. Open Alpha Jump's plugin settings and configure the supported libraries and
    options.
 
-The current repository manifest lists **v0.5.0.1**. Disable any existing Alpha Jump JavaScript Injector entry before using the plugin. After installation/restart, refresh open Jellyfin Web tabs to load the script.
+The current repository manifest lists **v0.5.2.0**. Disable any existing Alpha Jump JavaScript Injector entry before using the plugin. After installation/restart, refresh open Jellyfin Web tabs to load the script.
 
 ### Manual test installation
 
