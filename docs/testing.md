@@ -1,5 +1,18 @@
 # Alpha Jump test record
 
+## Current compatibility validation — 2026-10-28
+
+Temporary Jellyfin 12.4 package build: passed (zero warnings/errors); C# tests: 31/31;
+Node tests: 103/103; JavaScript syntax and ABI alignment: passed.
+Official Server/Web 12.2-to-12.4 source differences were reviewed.
+The maintainer reports successful testing of the existing release on their
+Jellyfin 12.4 instance. Browser versions and individual scenarios were not
+specified; this is maintainer-reported evidence, not an agent-run browser suite.
+Package pins and minimum ABI remain at 12.2; this is a documentation-only update.
+See [pinned sources and manual checks](compatibility-12.4.md).
+
+## Historical session record
+
 Date: 2026-09-20 to 2026-09-24. Prototype commit under test: local working tree based on `fe5d042038912484240d77b530b1c6e136e51c97`; this uncommitted rework has **not** been committed or pushed.
 
 Browser/session: authorized Codex in-app browser (its Chromium version was not exposed by the available test surface); Jellyfin Server/Web identified in the UI as Grogpool 12.1; Jellyfin Enhanced 12.7.0.0-639247594740000000 was active. The user authorized a temporary authenticated JavaScript Injector script named `AJ test`. The diagnostic script used to inspect prerequisites is disabled again. No credentials, tokens, or HAR were recorded.
